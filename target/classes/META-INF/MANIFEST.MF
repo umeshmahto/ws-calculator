@@ -1,6 +1,3 @@
 Manifest-Version: 1.0
-Build-Jdk-Spec: 21
-Implementation-Title: ws-calculation
-Implementation-Version: 1.4.4-SNAPSHOT
-Created-By: Maven Integration for Eclipse
+Class-Path: 
 

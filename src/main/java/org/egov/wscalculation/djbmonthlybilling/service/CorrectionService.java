@@ -3,6 +3,7 @@ package org.egov.wscalculation.djbmonthlybilling.service;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 import org.egov.wscalculation.djbmonthlybilling.model.BillingCorrection;
 import org.egov.wscalculation.djbmonthlybilling.model.WaterBillingCycle;
@@ -149,11 +150,7 @@ public class CorrectionService {
 
         BillingCorrection correction = new BillingCorrection();
 
-        correction.setId(
-                plan.getPreviousOkBillingCycleId()
-                        + "-"
-                        + plan.getCurrentOkBillingCycleId()
-                        + "-CORR");
+        correction.setId(UUID.randomUUID().toString());
 
         correction.setTenantid(tenantId);
         correction.setConnectionno(plan.getConnectionNo());

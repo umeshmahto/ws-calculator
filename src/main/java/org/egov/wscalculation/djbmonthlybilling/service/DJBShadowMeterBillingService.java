@@ -6,13 +6,15 @@ import java.util.UUID;
 
 import org.egov.common.contract.request.RequestInfo;
 import org.egov.wscalculation.djbmonthlybilling.model.WaterBillingCycle;
-import org.egov.wscalculation.djbmonthlybilling.model.enums.BillingBasis;
 import org.egov.wscalculation.djbmonthlybilling.model.enums.BillingCycleStatus;
 import org.egov.wscalculation.djbmonthlybilling.model.enums.CorrectionStatus;
 import org.egov.wscalculation.djbmonthlybilling.model.master.DJBMonthlyBillingRule;
 import org.egov.wscalculation.djbmonthlybilling.model.master.DJBReadingQualityCode;
 import org.egov.wscalculation.djbmonthlybilling.repository.WaterBillingCycleDao;
+import org.egov.wscalculation.djbmonthlybilling.service.dto.BillingBasisDecision;
 import org.egov.wscalculation.djbmonthlybilling.service.dto.ConsumptionResult;
+import org.egov.wscalculation.djbmonthlybilling.service.dto.CorrectionPlan;
+import org.egov.wscalculation.djbmonthlybilling.service.dto.MonthlyBillingCalculationResult;
 import org.egov.wscalculation.djbmonthlybilling.service.master.DJBMonthlyBillingMasterProvider;
 import org.egov.wscalculation.service.MeterService;
 import org.egov.wscalculation.web.models.MeterConnectionRequest;
@@ -27,17 +29,20 @@ public class DJBShadowMeterBillingService {
     private final DJBMonthlyBillingMasterProvider masterProvider;
     private final DJBMonthlyBillingService monthlyBillingService;
     private final WaterBillingCycleDao billingCycleDao;
+    private final CorrectionService correctionService;
 
     public DJBShadowMeterBillingService(
             MeterService meterService,
             DJBMonthlyBillingMasterProvider masterProvider,
             DJBMonthlyBillingService monthlyBillingService,
-            WaterBillingCycleDao billingCycleDao) {
+            WaterBillingCycleDao billingCycleDao,
+            CorrectionService correctionService) {
 
         this.meterService = meterService;
         this.masterProvider = masterProvider;
         this.monthlyBillingService = monthlyBillingService;
         this.billingCycleDao = billingCycleDao;
+        this.correctionService = correctionService;
     }
 
     @Transactional
@@ -126,13 +131,16 @@ public class DJBShadowMeterBillingService {
 
         cycle.setStatus(BillingCycleStatus.CREATED);
 
-        ConsumptionResult result =
-                monthlyBillingService.determineConsumption(
+        MonthlyBillingCalculationResult calculation =
+                monthlyBillingService.determineCycle(
                         tenantId,
                         connectionNo,
                         cycle,
                         rqc,
                         rule);
+
+        BillingBasisDecision decision = calculation.getBillingBasisDecision();
+        ConsumptionResult result = calculation.getConsumptionResult();
 
         cycle.setActualconsumption(result.getActualConsumption());
         cycle.setAverageconsumption(result.getAverageConsumption());
@@ -140,22 +148,34 @@ public class DJBShadowMeterBillingService {
         cycle.setPreviousconsumption(result.getPreviousConsumption());
         cycle.setDeviationfactor(result.getDeviationFactor());
         cycle.setOnepointfivexflag(result.isOnePointFiveX());
+        cycle.setAveragecyclecount(decision.getAverageCycleCount());
+        cycle.setProvisionalcyclecount(decision.getProvisionalCycleCount());
 
         /*
          * This shadow API only tests monthly-basis and consumption persistence.
          * Tariff/sewerage/rebate are tested by the separate calculation API
          * until the full monthly orchestrator is wired.
          */
-        cycle.setBillingbasis(
-                BillingBasis.ACTUAL.equals(
-                        result.getBillingConsumption() != null
-                                ? BillingBasis.ACTUAL
-                                : null)
-                        && "OK".equalsIgnoreCase(reading.getReadingQualityCode())
-                        ? BillingBasis.ACTUAL
-                        : BillingBasis.AVERAGE);
+        cycle.setBillingbasis(decision.getBillingBasis());
 
         cycle.setCorrectionstatus(CorrectionStatus.NOT_REQUIRED);
+
+        if ("OK".equalsIgnoreCase(reading.getReadingQualityCode())) {
+            CorrectionPlan correctionPlan =
+                    correctionService.buildCorrectionPlan(
+                            tenantId,
+                            cycle);
+
+            if (correctionPlan.isCorrectionRequired()) {
+                correctionService.createPendingCorrection(
+                        tenantId,
+                        correctionPlan,
+                        actor(requestInfo),
+                        System.currentTimeMillis());
+                cycle.setCorrectionstatus(CorrectionStatus.PENDING);
+            }
+        }
+
         cycle.setStatus(BillingCycleStatus.CALCULATED);
         cycle.setLastmodifiedby(actor(requestInfo));
         cycle.setLastmodifiedtime(System.currentTimeMillis());
