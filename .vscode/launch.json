@@ -1,0 +1,14 @@
+{
+    "configurations": [
+        {
+            "type": "java",
+            "name": "Spring Boot-WsCalculationApplication<ws-calculator>",
+            "request": "launch",
+            "cwd": "${workspaceFolder}",
+            "mainClass": "org.egov.wscalculation.WsCalculationApplication",
+            "projectName": "ws-calculator",
+            "args": "",
+            "envFile": "${workspaceFolder}/.env"
+        }
+    ]
+}
