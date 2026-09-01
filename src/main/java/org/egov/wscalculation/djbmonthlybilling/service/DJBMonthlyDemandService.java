@@ -7,6 +7,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import org.egov.common.contract.request.RequestInfo;
 import org.egov.common.contract.request.User;
 import org.egov.wscalculation.constants.WSCalculationConstant;
@@ -30,6 +33,9 @@ import org.egov.wscalculation.repository.DemandRepository;
 import org.egov.wscalculation.util.CalculatorUtil;
 import org.egov.wscalculation.util.WSCalculationUtil;
 import org.egov.wscalculation.config.WSCalculationConfiguration;
+import org.egov.wscalculation.producer.WSCalculationProducer;
+import org.egov.wscalculation.repository.ServiceRequestRepository;
+import org.egov.wscalculation.web.models.RequestInfoWrapper;
 import org.egov.wscalculation.web.models.Demand;
 import org.egov.wscalculation.web.models.DemandDetail;
 import org.egov.wscalculation.web.models.DemandNotificationObj;
@@ -53,6 +59,9 @@ public class DJBMonthlyDemandService {
     private final CalculatorUtil calculatorUtil;
     private final WSCalculationUtil wsCalculationUtil;
     private final WSCalculationConfiguration config;
+    private final ServiceRequestRepository serviceRequestRepository;
+    private final ObjectMapper objectMapper;
+    private final WSCalculationProducer wsCalculationProducer;
 
     public DJBMonthlyDemandService(
             DJBMonthlyBillingMasterProvider masterProvider,
@@ -62,7 +71,10 @@ public class DJBMonthlyDemandService {
             DemandRepository demandRepository,
             CalculatorUtil calculatorUtil,
             WSCalculationUtil wsCalculationUtil,
-            WSCalculationConfiguration config) {
+            WSCalculationConfiguration config,
+            ServiceRequestRepository serviceRequestRepository,
+            ObjectMapper objectMapper,
+            WSCalculationProducer wsCalculationProducer) {
 
         this.masterProvider = masterProvider;
         this.tariffCalculationService = tariffCalculationService;
@@ -72,6 +84,9 @@ public class DJBMonthlyDemandService {
         this.calculatorUtil = calculatorUtil;
         this.wsCalculationUtil = wsCalculationUtil;
         this.config = config;
+        this.serviceRequestRepository = serviceRequestRepository;
+        this.objectMapper = objectMapper;
+        this.wsCalculationProducer = wsCalculationProducer;
     }
 
     /**
@@ -79,7 +94,9 @@ public class DJBMonthlyDemandService {
      * cycle. This service owns only DJB rule calculation and mapping. The
      * generic billing-service remains untouched.
      *
-     * No Bill API is called here.
+     * After demand creation, the generic billing-service bill fetch API is
+     * invoked for normal (non-ZRO, non-pending-correction) cycles. The
+     * billing-service remains completely generic.
      */
     public DemandResult createDemand(
             RequestInfo requestInfo,
@@ -306,15 +323,168 @@ public class DJBMonthlyDemandService {
 
         Demand created = response.get(0);
 
+        /*
+         * Follow the same generic UPYOG pattern as the existing
+         * DemandService.createDemand(): after a normal demand is created,
+         * fetchBill() is invoked. 1.5x/ZRO and pending automatic-correction
+         * cycles deliberately do not enter this ordinary bill path.
+         */
+        String billId = null;
+        if (!CorrectionStatus.PENDING.equals(cycle.getCorrectionstatus())) {
+            billId = fetchAndGetBillId(
+                    requestInfo,
+                    created);
+        }
+
         return DemandResult.builder()
                 .demandCreated(true)
                 .zroRequired(false)
                 .demand(created)
+                .billId(billId)
                 .grossAmount(grossAmount)
                 .rebateAmount(rebate.getTotalRebate())
                 .netAmount(netAmount)
-                .message("DJB demand created successfully")
+                .message(StringUtils.hasText(billId)
+                        ? "DJB demand and bill created successfully"
+                        : "DJB demand created successfully")
                 .build();
+    }
+
+    /**
+     * Uses the same generic UPYOG bill-fetch contract used by the existing
+     * water calculation flow:
+     *
+     * POST {billing-service}/bill/v2/_fetchbill
+     * ?tenantId=...
+     * &consumerCode=...
+     * &businessService=WS
+     *
+     * The endpoint searches an existing bill and generates one when there is
+     * no valid bill for the criteria.
+     */
+    private String fetchAndGetBillId(
+            RequestInfo requestInfo,
+            Demand demand) {
+
+        StringBuilder url = calculatorUtil.getFetchBillURL(
+                demand.getTenantId(),
+                demand.getConsumerCode());
+
+        Object result = serviceRequestRepository.fetchResult(
+                url,
+                RequestInfoWrapper.builder()
+                        .requestInfo(requestInfo)
+                        .build());
+
+        if (result == null) {
+            throw new IllegalStateException(
+                    "Billing-service returned null bill response for "
+                            + demand.getConsumerCode());
+        }
+
+        /*
+         * Emit the same payment trigger used by the existing generic
+         * DemandService.fetchBill() flow. This is notification/event handling,
+         * not demand or bill creation itself.
+         */
+        Map<String, Object> billResponse = new HashMap<>();
+        billResponse.put("requestInfo", requestInfo);
+        billResponse.put("billResponse", result);
+        wsCalculationProducer.push(
+                config.getPayTriggers(),
+                billResponse);
+
+        String billId = extractBillId(result);
+
+        if (!StringUtils.hasText(billId)) {
+            throw new IllegalStateException(
+                    "Billing-service returned bill response without bill id for "
+                            + demand.getConsumerCode());
+        }
+
+        return billId;
+    }
+
+    private String extractBillId(Object response) {
+
+        JsonNode root = objectMapper.valueToTree(response);
+
+        JsonNode billNode = findNodeIgnoreCase(root, "bill");
+
+        if (billNode == null) {
+            billNode = findNodeIgnoreCase(root, "bills");
+        }
+
+        if (billNode == null) {
+            return null;
+        }
+
+        if (billNode.isArray()) {
+            for (JsonNode bill : billNode) {
+                JsonNode id = bill.get("id");
+                if (id != null && !id.isNull()
+                        && StringUtils.hasText(id.asText())) {
+                    return id.asText();
+                }
+            }
+        }
+
+        if (billNode.isObject()) {
+            JsonNode id = billNode.get("id");
+            if (id != null && !id.isNull()
+                    && StringUtils.hasText(id.asText())) {
+                return id.asText();
+            }
+        }
+
+        return null;
+    }
+
+    private JsonNode findNodeIgnoreCase(
+            JsonNode node,
+            String fieldName) {
+
+        if (node == null) {
+            return null;
+        }
+
+        if (node.isObject()) {
+
+            java.util.Iterator<Map.Entry<String, JsonNode>> fields =
+                    node.fields();
+
+            while (fields.hasNext()) {
+                Map.Entry<String, JsonNode> entry = fields.next();
+
+                if (entry.getKey().equalsIgnoreCase(fieldName)) {
+                    return entry.getValue();
+                }
+
+                JsonNode nested =
+                        findNodeIgnoreCase(
+                                entry.getValue(),
+                                fieldName);
+
+                if (nested != null) {
+                    return nested;
+                }
+            }
+        }
+
+        if (node.isArray()) {
+            for (JsonNode child : node) {
+                JsonNode nested =
+                        findNodeIgnoreCase(
+                                child,
+                                fieldName);
+
+                if (nested != null) {
+                    return nested;
+                }
+            }
+        }
+
+        return null;
     }
 
     private WaterConnection loadWaterConnection(
@@ -481,6 +651,7 @@ public class DJBMonthlyDemandService {
         private boolean demandCreated;
         private boolean zroRequired;
         private Demand demand;
+        private String billId;
         private BigDecimal grossAmount;
         private BigDecimal rebateAmount;
         private BigDecimal netAmount;

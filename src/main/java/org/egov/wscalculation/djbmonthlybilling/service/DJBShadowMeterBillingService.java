@@ -22,6 +22,7 @@ import org.egov.wscalculation.web.models.MeterReading;
 import org.egov.wscalculation.djbmonthlybilling.service.CorrectionService.CorrectionPlanResult;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 @Service
 public class DJBShadowMeterBillingService {
@@ -257,8 +258,16 @@ public class DJBShadowMeterBillingService {
 
             cycle.setDemandid(
                     demandResult.getDemand().getId());
-            cycle.setStatus(
-                    BillingCycleStatus.DEMAND_CREATED);
+
+            if (StringUtils.hasText(demandResult.getBillId())) {
+                cycle.setBillid(
+                        demandResult.getBillId());
+                cycle.setStatus(
+                        BillingCycleStatus.BILL_GENERATED);
+            } else {
+                cycle.setStatus(
+                        BillingCycleStatus.DEMAND_CREATED);
+            }
 
             /*
              * Keep the correction flag if this is an automatic corrected-actual
@@ -271,6 +280,8 @@ public class DJBShadowMeterBillingService {
                         System.currentTimeMillis());
             }
 
+            cycle.setLastmodifiedby(actor(requestInfo));
+            cycle.setLastmodifiedtime(System.currentTimeMillis());
             billingCycleDao.update(cycle);
         } else if (demandResult.isZroRequired()) {
             cycle.setStatus(
