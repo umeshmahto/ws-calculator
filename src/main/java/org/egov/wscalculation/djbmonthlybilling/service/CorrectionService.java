@@ -184,4 +184,45 @@ public class CorrectionService {
                     "Automatic correction requires RQC=OK");
         }
     }
+    /**
+     * Runs only automatic correction detection and creates the pending
+     * correction record. It does not cancel bills.
+     */
+    public CorrectionPlanResult processAutomaticCorrection(
+            String tenantId,
+            WaterBillingCycle currentOkCycle,
+            String actor,
+            long currentTime) {
+
+        CorrectionPlan plan =
+                buildCorrectionPlan(tenantId, currentOkCycle);
+
+        if (plan == null || !plan.isCorrectionRequired()) {
+            return CorrectionPlanResult.builder()
+                    .correctionRequired(false)
+                    .build();
+        }
+
+        BillingCorrection correction =
+                createPendingCorrection(
+                        tenantId,
+                        plan,
+                        actor,
+                        currentTime);
+
+        return CorrectionPlanResult.builder()
+                .correctionRequired(correction != null)
+                .correction(correction)
+                .plan(plan)
+                .build();
+    }
+
+    @lombok.Builder
+    @lombok.Data
+    public static class CorrectionPlanResult {
+        private boolean correctionRequired;
+        private CorrectionPlan plan;
+        private BillingCorrection correction;
+    }
+
 }

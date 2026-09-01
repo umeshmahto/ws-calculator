@@ -6,6 +6,7 @@ import java.util.UUID;
 
 import org.egov.common.contract.request.RequestInfo;
 import org.egov.wscalculation.djbmonthlybilling.model.WaterBillingCycle;
+import org.egov.wscalculation.djbmonthlybilling.model.enums.BillingBasis;
 import org.egov.wscalculation.djbmonthlybilling.model.enums.BillingCycleStatus;
 import org.egov.wscalculation.djbmonthlybilling.model.enums.CorrectionStatus;
 import org.egov.wscalculation.djbmonthlybilling.model.master.DJBMonthlyBillingRule;
@@ -13,12 +14,12 @@ import org.egov.wscalculation.djbmonthlybilling.model.master.DJBReadingQualityCo
 import org.egov.wscalculation.djbmonthlybilling.repository.WaterBillingCycleDao;
 import org.egov.wscalculation.djbmonthlybilling.service.dto.BillingBasisDecision;
 import org.egov.wscalculation.djbmonthlybilling.service.dto.ConsumptionResult;
-import org.egov.wscalculation.djbmonthlybilling.service.dto.CorrectionPlan;
 import org.egov.wscalculation.djbmonthlybilling.service.dto.MonthlyBillingCalculationResult;
 import org.egov.wscalculation.djbmonthlybilling.service.master.DJBMonthlyBillingMasterProvider;
 import org.egov.wscalculation.service.MeterService;
 import org.egov.wscalculation.web.models.MeterConnectionRequest;
 import org.egov.wscalculation.web.models.MeterReading;
+import org.egov.wscalculation.djbmonthlybilling.service.CorrectionService.CorrectionPlanResult;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -30,19 +31,21 @@ public class DJBShadowMeterBillingService {
     private final DJBMonthlyBillingService monthlyBillingService;
     private final WaterBillingCycleDao billingCycleDao;
     private final CorrectionService correctionService;
+    private final DJBMonthlyDemandService demandService;
 
-    public DJBShadowMeterBillingService(
-            MeterService meterService,
+    public DJBShadowMeterBillingService(MeterService meterService,
             DJBMonthlyBillingMasterProvider masterProvider,
             DJBMonthlyBillingService monthlyBillingService,
             WaterBillingCycleDao billingCycleDao,
-            CorrectionService correctionService) {
+            CorrectionService correctionService,
+            DJBMonthlyDemandService demandService) {
 
         this.meterService = meterService;
         this.masterProvider = masterProvider;
         this.monthlyBillingService = monthlyBillingService;
         this.billingCycleDao = billingCycleDao;
         this.correctionService = correctionService;
+        this.demandService = demandService;
     }
 
     @Transactional
@@ -54,19 +57,29 @@ public class DJBShadowMeterBillingService {
         MeterReading reading = request.getMeterReading();
 
         /*
-         * Reuse the production meter-reading create path only for validation,
-         * enrichment and persistence. Demand generation is explicitly disabled
-         * in the copy so the existing legacy demand flow cannot run.
+         * Shadow endpoint reuses the existing meter create flow for persistence
+         * only. It must not invoke the generic current-reading minus last-reading
+         * demand path.
          */
-        Boolean originalGenerateDemand = reading.getGenerateDemand();
+        Boolean originalGenerateDemand =
+                reading.getGenerateDemand();
         reading.setGenerateDemand(Boolean.FALSE);
 
         try {
-            MeterConnectionRequest persistenceRequest = MeterConnectionRequest.builder().requestInfo(request.getRequestInfo())
-            		.meterReading(reading).build();
+            MeterConnectionRequest persistenceRequest =
+                    MeterConnectionRequest.builder()
+                            .requestInfo(request.getRequestInfo())
+                            .meterReading(reading)
+                            .build();
 
-            List<MeterReading> saved = meterService.createMeterReading(persistenceRequest);
-            processDjbBilling(reading, request.getRequestInfo());
+            List<MeterReading> saved =
+                    meterService.createMeterReading(
+                            persistenceRequest);
+
+            processDjbBilling(
+                    reading,
+                    request.getRequestInfo());
+
             return saved;
 
         } finally {
@@ -74,13 +87,22 @@ public class DJBShadowMeterBillingService {
         }
     }
 
-    private void processDjbBilling(MeterReading reading,RequestInfo requestInfo) {
+    private void processDjbBilling(
+            MeterReading reading,
+            RequestInfo requestInfo) {
 
         String tenantId = reading.getTenantId();
         String connectionNo = reading.getConnectionNo();
 
-        DJBMonthlyBillingRule rule = masterProvider.getBillingRule(requestInfo, tenantId);
-        DJBReadingQualityCode rqc = masterProvider.findReadingQualityCode(requestInfo,tenantId,reading.getReadingQualityCode());
+        DJBMonthlyBillingRule rule =
+                masterProvider.getBillingRule(
+                        requestInfo, tenantId);
+
+        DJBReadingQualityCode rqc =
+                masterProvider.findReadingQualityCode(
+                        requestInfo,
+                        tenantId,
+                        reading.getReadingQualityCode());
 
         long from = reading.getLastReadingDate();
         long to = reading.getCurrentReadingDate();
@@ -91,9 +113,16 @@ public class DJBShadowMeterBillingService {
             to = tmp;
         }
 
-        WaterBillingCycle cycle = billingCycleDao.findByConnectionAndPeriod(tenantId,connectionNo,from,to);
+        WaterBillingCycle cycle =
+                billingCycleDao.findByConnectionAndPeriod(
+                        tenantId,
+                        connectionNo,
+                        from,
+                        to);
 
-        if (cycle == null) {
+        boolean existing = cycle != null;
+
+        if (!existing) {
             cycle = new WaterBillingCycle();
             cycle.setId(UUID.randomUUID().toString());
             cycle.setTenantid(tenantId);
@@ -103,17 +132,24 @@ public class DJBShadowMeterBillingService {
             cycle.setMeterreadingid(reading.getId());
             cycle.setCreatedby(actor(requestInfo));
             cycle.setCreatedtime(System.currentTimeMillis());
+        } else {
+            /*
+             * A repeat of the same billing period is an update, not a second
+             * demand. Keep the same cycle ID and only update its calculation.
+             */
+            cycle.setMeterreadingid(reading.getId());
         }
 
-        cycle.setReadingqualitycode(reading.getReadingQualityCode());
-        cycle.setCurrentreading(
-                BigDecimal.valueOf(reading.getCurrentReading()));
-        cycle.setCurrentreadingdate(reading.getCurrentReadingDate());
+        cycle.setReadingqualitycode(
+                reading.getReadingQualityCode());
 
-        /*
-         * Previous OK is from DJB billing-cycle history. For the first test
-         * reading, the meter API's lastReading is used as the baseline.
-         */
+        cycle.setCurrentreading(
+                BigDecimal.valueOf(
+                        reading.getCurrentReading()));
+
+        cycle.setCurrentreadingdate(
+                reading.getCurrentReadingDate());
+
         WaterBillingCycle previousOk =
                 billingCycleDao.findPreviousOkByConnectionBefore(
                         tenantId,
@@ -121,12 +157,16 @@ public class DJBShadowMeterBillingService {
                         to);
 
         if (previousOk != null) {
-            cycle.setPreviousokreading(previousOk.getCurrentreading());
-            cycle.setPreviousokreadingdate(previousOk.getCurrentreadingdate());
+            cycle.setPreviousokreading(
+                    previousOk.getCurrentreading());
+            cycle.setPreviousokreadingdate(
+                    previousOk.getCurrentreadingdate());
         } else {
             cycle.setPreviousokreading(
-                    BigDecimal.valueOf(reading.getLastReading()));
-            cycle.setPreviousokreadingdate(reading.getLastReadingDate());
+                    BigDecimal.valueOf(
+                            reading.getLastReading()));
+            cycle.setPreviousokreadingdate(
+                    reading.getLastReadingDate());
         }
 
         cycle.setStatus(BillingCycleStatus.CREATED);
@@ -139,97 +179,142 @@ public class DJBShadowMeterBillingService {
                         rqc,
                         rule);
 
-        BillingBasisDecision decision = calculation.getBillingBasisDecision();
-        ConsumptionResult result = calculation.getConsumptionResult();
+        BillingBasisDecision decision =
+                calculation.getBillingBasisDecision();
 
-        cycle.setActualconsumption(result.getActualConsumption());
-        cycle.setAverageconsumption(result.getAverageConsumption());
-        cycle.setBillingconsumption(result.getBillingConsumption());
-        cycle.setPreviousconsumption(result.getPreviousConsumption());
-        cycle.setDeviationfactor(result.getDeviationFactor());
-        cycle.setOnepointfivexflag(result.isOnePointFiveX());
-        cycle.setAveragecyclecount(decision.getAverageCycleCount());
-        cycle.setProvisionalcyclecount(decision.getProvisionalCycleCount());
+        ConsumptionResult result =
+                calculation.getConsumptionResult();
+
+        cycle.setActualconsumption(
+                result.getActualConsumption());
+        cycle.setAverageconsumption(
+                result.getAverageConsumption());
+        cycle.setBillingconsumption(
+                result.getBillingConsumption());
+        cycle.setPreviousconsumption(
+                result.getPreviousConsumption());
+        cycle.setDeviationfactor(
+                result.getDeviationFactor());
+        cycle.setOnepointfivexflag(
+                result.isOnePointFiveX());
 
         /*
-         * This shadow API only tests monthly-basis and consumption persistence.
-         * Tariff/sewerage/rebate are tested by the separate calculation API
-         * until the full monthly orchestrator is wired.
+         * IMPORTANT: keep the billing-basis decision and both cycle counters
+         * produced by BillingBasisService. These values drive the DJB rule
+         * for the first two average rounds and the post-average round.
          */
-        cycle.setBillingbasis(decision.getBillingBasis());
+        cycle.setAveragecyclecount(
+                decision.getAverageCycleCount());
+        cycle.setProvisionalcyclecount(
+                decision.getProvisionalCycleCount());
+        cycle.setBillingbasis(
+                decision.getBillingBasis());
 
-        cycle.setCorrectionstatus(CorrectionStatus.NOT_REQUIRED);
-
-        if ("OK".equalsIgnoreCase(reading.getReadingQualityCode())) {
-            CorrectionPlan correctionPlan =
-                    correctionService.buildCorrectionPlan(
-                            tenantId,
-                            cycle);
-
-            if (correctionPlan.isCorrectionRequired()) {
-                correctionService.createPendingCorrection(
-                        tenantId,
-                        correctionPlan,
-                        actor(requestInfo),
-                        System.currentTimeMillis());
-                cycle.setCorrectionstatus(CorrectionStatus.PENDING);
-            }
-        }
-
-        cycle.setStatus(BillingCycleStatus.CALCULATED);
+        cycle.setCorrectionstatus(
+                CorrectionStatus.NOT_REQUIRED);
+        cycle.setStatus(
+                BillingCycleStatus.CALCULATED);
         cycle.setLastmodifiedby(actor(requestInfo));
         cycle.setLastmodifiedtime(System.currentTimeMillis());
 
-        if (cycle.getCreatedtime() == null) {
-            cycle.setCreatedtime(System.currentTimeMillis());
-        }
-
-        if (cycle.getCreatedby() == null) {
-            cycle.setCreatedby(actor(requestInfo));
-        }
-
-        if (cycleExists(
-                tenantId,
-                connectionNo,
-                from,
-                to)) {
-            billingCycleDao.update(cycle);
-        } else {
+        if (!existing) {
             billingCycleDao.save(cycle);
+        } else {
+            billingCycleDao.update(cycle);
+        }
+
+        /*
+         * A later OK reading automatically creates a correction plan for the
+         * intervening estimated cycles. No manual bill-cancel API is invoked.
+         */
+        if (BillingBasis.ACTUAL.equals(cycle.getBillingbasis())) {
+            CorrectionPlanResult correction =
+                    correctionService.processAutomaticCorrection(
+                            tenantId,
+                            cycle,
+                            actor(requestInfo),
+                            System.currentTimeMillis());
+
+            if (correction != null
+                    && correction.isCorrectionRequired()) {
+                cycle.setCorrectionstatus(
+                        CorrectionStatus.PENDING);
+                billingCycleDao.update(cycle);
+            }
+        }
+
+        /*
+         * Generate the generic UPYOG demand from the DJB-calculated amounts.
+         * billing-service itself remains generic.
+         */
+        DJBMonthlyDemandService.DemandResult demandResult =
+                demandService.createDemand(
+                        requestInfo,
+                        cycle);
+
+        if (demandResult.isDemandCreated()
+                && demandResult.getDemand() != null) {
+
+            cycle.setDemandid(
+                    demandResult.getDemand().getId());
+            cycle.setStatus(
+                    BillingCycleStatus.DEMAND_CREATED);
+
+            /*
+             * Keep the correction flag if this is an automatic corrected-actual
+             * period; otherwise it remains NOT_REQUIRED.
+             */
+            if (CorrectionStatus.PENDING.equals(
+                    cycle.getCorrectionstatus())) {
+                cycle.setLastmodifiedby(actor(requestInfo));
+                cycle.setLastmodifiedtime(
+                        System.currentTimeMillis());
+            }
+
+            billingCycleDao.update(cycle);
+        } else if (demandResult.isZroRequired()) {
+            cycle.setStatus(
+                    BillingCycleStatus.CALCULATED);
+            billingCycleDao.update(cycle);
         }
     }
 
-    private boolean cycleExists(String tenantId,String connectionNo,long from,long to) {
-        return billingCycleDao.findByConnectionAndPeriod(tenantId,connectionNo,from,to) != null;
-    }
+    private void validate(
+            MeterConnectionRequest request) {
 
-    private void validate(MeterConnectionRequest request) {
-
-        if (request == null || request.getMeterReading() == null) {
-            throw new IllegalArgumentException("meterReadings is required");
+        if (request == null
+                || request.getMeterReading() == null) {
+            throw new IllegalArgumentException(
+                    "meterReadings is required");
         }
 
-        MeterReading reading = request.getMeterReading();
+        MeterReading reading =
+                request.getMeterReading();
 
-        if (!"dl.djb".equalsIgnoreCase(reading.getTenantId())) {
-            throw new IllegalArgumentException("DJB shadow API only supports tenant dl.djb");
+        if (!"dl.djb".equalsIgnoreCase(
+                reading.getTenantId())) {
+            throw new IllegalArgumentException(
+                    "DJB shadow API only supports tenant dl.djb");
         }
 
         if (reading.getCurrentReading() == null
                 || reading.getCurrentReadingDate() == null
                 || reading.getLastReading() == null
                 || reading.getLastReadingDate() == null) {
-            throw new IllegalArgumentException("last/current reading and dates are required");
+            throw new IllegalArgumentException(
+                    "last/current reading and dates are required");
         }
 
         if (reading.getReadingQualityCode() == null) {
-            throw new IllegalArgumentException("readingQualityCode is required");
+            throw new IllegalArgumentException(
+                    "readingQualityCode is required");
         }
     }
 
     private String actor(RequestInfo requestInfo) {
 
-        if (requestInfo != null && requestInfo.getUserInfo() != null) {
+        if (requestInfo != null
+                && requestInfo.getUserInfo() != null) {
 
             if (requestInfo.getUserInfo().getUuid() != null) {
                 return requestInfo.getUserInfo().getUuid();
