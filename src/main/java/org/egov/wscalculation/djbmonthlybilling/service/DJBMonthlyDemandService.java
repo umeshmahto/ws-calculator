@@ -7,14 +7,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-
 import org.egov.common.contract.request.RequestInfo;
 import org.egov.common.contract.request.User;
+import org.egov.wscalculation.config.WSCalculationConfiguration;
 import org.egov.wscalculation.constants.WSCalculationConstant;
 import org.egov.wscalculation.djbmonthlybilling.model.WaterBillingCycle;
-import org.egov.wscalculation.djbmonthlybilling.model.enums.BillingBasis;
 import org.egov.wscalculation.djbmonthlybilling.model.enums.BillingCycleStatus;
 import org.egov.wscalculation.djbmonthlybilling.model.enums.CorrectionStatus;
 import org.egov.wscalculation.djbmonthlybilling.model.enums.ZroStatus;
@@ -22,639 +19,455 @@ import org.egov.wscalculation.djbmonthlybilling.model.master.DJBAdditionalSewera
 import org.egov.wscalculation.djbmonthlybilling.model.master.DJBMonthlyRebate;
 import org.egov.wscalculation.djbmonthlybilling.model.master.DJBMonthlySewerageRule;
 import org.egov.wscalculation.djbmonthlybilling.model.master.DJBMonthlyWaterTariff;
-import org.egov.wscalculation.djbmonthlybilling.repository.WaterBillingCycleDao;
 import org.egov.wscalculation.djbmonthlybilling.service.dto.RebateCalculationContext;
 import org.egov.wscalculation.djbmonthlybilling.service.dto.RebateCalculationResult;
 import org.egov.wscalculation.djbmonthlybilling.service.dto.SewerageCalculationContext;
 import org.egov.wscalculation.djbmonthlybilling.service.dto.SewerageCalculationResult;
 import org.egov.wscalculation.djbmonthlybilling.service.dto.TariffCalculationResult;
 import org.egov.wscalculation.djbmonthlybilling.service.master.DJBMonthlyBillingMasterProvider;
+import org.egov.wscalculation.producer.WSCalculationProducer;
 import org.egov.wscalculation.repository.DemandRepository;
+import org.egov.wscalculation.repository.ServiceRequestRepository;
 import org.egov.wscalculation.util.CalculatorUtil;
 import org.egov.wscalculation.util.WSCalculationUtil;
-import org.egov.wscalculation.config.WSCalculationConfiguration;
-import org.egov.wscalculation.producer.WSCalculationProducer;
-import org.egov.wscalculation.repository.ServiceRequestRepository;
-import org.egov.wscalculation.web.models.RequestInfoWrapper;
 import org.egov.wscalculation.web.models.Demand;
 import org.egov.wscalculation.web.models.DemandDetail;
 import org.egov.wscalculation.web.models.DemandNotificationObj;
 import org.egov.wscalculation.web.models.Property;
+import org.egov.wscalculation.web.models.RequestInfoWrapper;
 import org.egov.wscalculation.web.models.WaterConnection;
 import org.egov.wscalculation.web.models.WaterConnectionRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 @Service
 public class DJBMonthlyDemandService {
 
-    private static final int MONEY_SCALE = 2;
-
-    private final DJBMonthlyBillingMasterProvider masterProvider;
-    private final TariffCalculationService tariffCalculationService;
-    private final SewerageCalculationService sewerageCalculationService;
-    private final RebateCalculationService rebateCalculationService;
-    private final DemandRepository demandRepository;
-    private final CalculatorUtil calculatorUtil;
-    private final WSCalculationUtil wsCalculationUtil;
-    private final WSCalculationConfiguration config;
-    private final ServiceRequestRepository serviceRequestRepository;
-    private final ObjectMapper objectMapper;
-    private final WSCalculationProducer wsCalculationProducer;
-
-    public DJBMonthlyDemandService(
-            DJBMonthlyBillingMasterProvider masterProvider,
-            TariffCalculationService tariffCalculationService,
-            SewerageCalculationService sewerageCalculationService,
-            RebateCalculationService rebateCalculationService,
-            DemandRepository demandRepository,
-            CalculatorUtil calculatorUtil,
-            WSCalculationUtil wsCalculationUtil,
-            WSCalculationConfiguration config,
-            ServiceRequestRepository serviceRequestRepository,
-            ObjectMapper objectMapper,
-            WSCalculationProducer wsCalculationProducer) {
-
-        this.masterProvider = masterProvider;
-        this.tariffCalculationService = tariffCalculationService;
-        this.sewerageCalculationService = sewerageCalculationService;
-        this.rebateCalculationService = rebateCalculationService;
-        this.demandRepository = demandRepository;
-        this.calculatorUtil = calculatorUtil;
-        this.wsCalculationUtil = wsCalculationUtil;
-        this.config = config;
-        this.serviceRequestRepository = serviceRequestRepository;
-        this.objectMapper = objectMapper;
-        this.wsCalculationProducer = wsCalculationProducer;
-    }
-
-    /**
-     * Creates a generic UPYOG Demand from the already calculated DJB billing
-     * cycle. This service owns only DJB rule calculation and mapping. The
-     * generic billing-service remains untouched.
-     *
-     * After demand creation, the generic billing-service bill fetch API is
-     * invoked for normal (non-ZRO, non-pending-correction) cycles. The
-     * billing-service remains completely generic.
-     */
-    public DemandResult createDemand(
-            RequestInfo requestInfo,
-            WaterBillingCycle cycle) {
-
-        validateCycle(cycle);
-
-        // Idempotency: the same billing cycle must never create a second demand.
-        if (org.springframework.util.StringUtils.hasText(cycle.getDemandid())) {
-            return DemandResult.builder()
-                    .demandCreated(true)
-                    .zroRequired(false)
-                    .message("DJB demand already exists for billing cycle")
-                    .build();
-        }
-
-        if (Boolean.TRUE.equals(cycle.getOnepointfivexflag())
-                && isDomestic(cycle, requestInfo)) {
-            cycle.setZrostatus(ZroStatus.PENDING);
-            cycle.setZroremarks(
-                    "Consumption exceeds DJB 1.5x threshold; ZRO verification required");
-            cycle.setStatus(BillingCycleStatus.CALCULATED);
-
-            return DemandResult.builder()
-                    .demandCreated(false)
-                    .zroRequired(true)
-                    .message("Demand not generated because DJB 1.5x ZRO verification is required")
-                    .build();
-        }
-
-        BigDecimal consumption = cycle.getBillingconsumption();
-        if (consumption == null) {
-            throw new IllegalStateException(
-                    "Billing consumption is required before demand generation");
-        }
-
-        String tenantId = cycle.getTenantid();
-        String connectionNo = cycle.getConnectionno();
-
-        WaterConnection connection = loadWaterConnection(
-                requestInfo, connectionNo, tenantId);
-
-        Property property = wsCalculationUtil.getProperty(
-                WaterConnectionRequest.builder()
-                        .requestInfo(requestInfo)
-                        .waterConnection(connection)
-                        .build());
-
-        String category = resolveTariffCategory(
-                connection, property);
-
-        List<DJBMonthlyWaterTariff> tariffs =
-                masterProvider.getWaterTariffs(requestInfo, tenantId);
-
-        TariffCalculationResult water =
-                tariffCalculationService.calculate(
-                        consumption, category, tariffs);
-
-        SewerageCalculationContext sewerageContext =
-                SewerageCalculationContext.builder()
-                        .waterVolumetricCharge(
-                                water.getWaterVolumetricCharge())
-                        .waterConnectionAvailable(true)
-                        .sewerConnectionAvailable(true)
-                        .additionalWaterSource(
-                                isAdditionalWaterSource(connection))
-                        .consumerCategory(category)
-                        .propertyUsage(property.getUsageCategory())
-                        .builtUpAreaSqm(property.getSuperBuiltUpArea())
-                        .build();
-
-        List<DJBMonthlySewerageRule> sewerageRules =
-                masterProvider.getSewerageRules(
-                        requestInfo, tenantId);
-
-        List<DJBAdditionalSewerageCharge> additionalSewerageRules =
-                masterProvider.getAdditionalSewerageCharges(
-                        requestInfo, tenantId);
-
-        SewerageCalculationResult sewerage =
-                sewerageCalculationService.calculate(
-                        sewerageContext,
-                        sewerageRules,
-                        additionalSewerageRules);
-
-        BigDecimal grossAmount =
-                water.getTotalWaterCharge()
-                        .add(sewerage.getTotalSewerageCharge())
-                        .setScale(MONEY_SCALE, RoundingMode.HALF_UP);
-
-        List<DJBMonthlyRebate> rebates =
-                masterProvider.getRebates(requestInfo, tenantId);
-
-        RebateCalculationContext rebateContext =
-                RebateCalculationContext.builder()
-                        .consumption(consumption)
-                        .billingBasis(cycle.getBillingbasis())
-                        .readingQualityCode(cycle.getReadingqualitycode())
-                        .consumerType(category)
-                        .propertyCategory(category)
-                        .connectionType(category)
-                        .bulkConnection(false)
-                        .propertyAreaSqm(property.getSuperBuiltUpArea())
-                        .functionalRwh(false)
-                        .functionalWastewaterRecycling(false)
-                        .totalBillBeforeRebate(grossAmount)
-                        .freeWaterEligibleAmount(
-                                water.getTotalWaterCharge())
-                        .build();
-
-        RebateCalculationResult rebate =
-                rebateCalculationService.calculate(
-                        rebateContext, rebates);
-
-        BigDecimal netAmount =
-                grossAmount.subtract(rebate.getTotalRebate())
-                        .setScale(MONEY_SCALE, RoundingMode.HALF_UP);
-
-        if (netAmount.signum() < 0) {
-            throw new IllegalStateException(
-                    "DJB net demand amount cannot be negative: " + netAmount);
-        }
-
-        List<DemandDetail> demandDetails = new java.util.ArrayList<>();
-
-        /*
-         * Current generic WS tax-head contract contains WS_CHARGE and
-         * WS_TIME_REBATE. We keep the complete gross water + sewer amount in
-         * WS_CHARGE, and represent DJB rebates as a negative WS_TIME_REBATE.
-         *
-         * We do not invent a DJB-specific tax head because billing-service
-         * owns generic tax-head masters.
-         */
-        if (grossAmount.signum() > 0) {
-            demandDetails.add(
-                    DemandDetail.builder()
-                            .taxHeadMasterCode(
-                                    WSCalculationConstant.WS_CHARGE)
-                            .taxAmount(grossAmount)
-                            .collectionAmount(BigDecimal.ZERO)
-                            .tenantId(tenantId)
-                            .build());
-        }
-
-        if (rebate.getTotalRebate().signum() > 0) {
-            demandDetails.add(
-                    DemandDetail.builder()
-                            .taxHeadMasterCode(
-                                    WSCalculationConstant.WS_TIME_REBATE)
-                            .taxAmount(
-                                    rebate.getTotalRebate()
-                                            .negate()
-                                            .setScale(MONEY_SCALE,
-                                                    RoundingMode.HALF_UP))
-                            .collectionAmount(BigDecimal.ZERO)
-                            .tenantId(tenantId)
-                            .build());
-        }
-
-        if (demandDetails.isEmpty()) {
-            throw new IllegalStateException(
-                    "No positive DJB demand detail could be generated");
-        }
-
-        User payer = resolvePayer(connection, property);
-
-        Long taxPeriodFrom = cycle.getBillingperiodfrom();
-        if (CorrectionStatus.PENDING.equals(
-                cycle.getCorrectionstatus())
-                && cycle.getPreviousokreadingdate() != null) {
-            /*
-             * DJB automatic correction is a single actual demand from the
-             * previous OK reading to the current OK reading.
-             */
-            taxPeriodFrom = cycle.getPreviousokreadingdate();
-        }
-
-        Demand demand = Demand.builder()
-                .tenantId(tenantId)
-                .consumerCode(connectionNo)
-                .consumerType("waterConnection")
-                .businessService(config.getBusinessService())
-                .payer(payer)
-                .taxPeriodFrom(taxPeriodFrom)
-                .taxPeriodTo(cycle.getBillingperiodto())
-                .demandDetails(demandDetails)
-                .minimumAmountPayable(
-                        config.getMinimumPayableAmount())
-                .billExpiryTime(
-                        config.getDemandBillExpiryTime() == null
-                                ? null
-                                : System.currentTimeMillis()
-                                        + config.getDemandBillExpiryTime())
-                .status(Demand.StatusEnum.ACTIVE)
-                .additionalDetails(buildAdditionalDetails(
-                        cycle, category, grossAmount,
-                        rebate.getTotalRebate(), netAmount,
-                        property.getPropertyId()))
-                .build();
-
-        DemandNotificationObj notification =
-                DemandNotificationObj.builder()
-                        .requestInfo(requestInfo)
-                        .tenantId(tenantId)
-                        .waterConnectionIds(
-                                Collections.singleton(connectionNo))
-                        .billingCycle(
-                                WSCalculationConstant.Monthly_Billing_Period)
-                        .build();
-
-        List<Demand> response =
-                demandRepository.saveDemand(
-                        requestInfo,
-                        Collections.singletonList(demand),
-                        notification);
-
-        if (CollectionUtils.isEmpty(response)
-                || response.get(0) == null
-                || !StringUtils.hasText(response.get(0).getId())) {
-            throw new IllegalStateException(
-                    "Billing-service returned no demand id for "
-                            + connectionNo);
-        }
-
-        Demand created = response.get(0);
-
-        /*
-         * Follow the same generic UPYOG pattern as the existing
-         * DemandService.createDemand(): after a normal demand is created,
-         * fetchBill() is invoked. 1.5x/ZRO and pending automatic-correction
-         * cycles deliberately do not enter this ordinary bill path.
-         */
-        String billId = null;
-        if (!CorrectionStatus.PENDING.equals(cycle.getCorrectionstatus())) {
-            billId = fetchAndGetBillId(
-                    requestInfo,
-                    created);
-        }
-
-        return DemandResult.builder()
-                .demandCreated(true)
-                .zroRequired(false)
-                .demand(created)
-                .billId(billId)
-                .grossAmount(grossAmount)
-                .rebateAmount(rebate.getTotalRebate())
-                .netAmount(netAmount)
-                .message(StringUtils.hasText(billId)
-                        ? "DJB demand and bill created successfully"
-                        : "DJB demand created successfully")
-                .build();
-    }
-
-    /**
-     * Uses the same generic UPYOG bill-fetch contract used by the existing
-     * water calculation flow:
-     *
-     * POST {billing-service}/bill/v2/_fetchbill
-     * ?tenantId=...
-     * &consumerCode=...
-     * &businessService=WS
-     *
-     * The endpoint searches an existing bill and generates one when there is
-     * no valid bill for the criteria.
-     */
-    private String fetchAndGetBillId(
-            RequestInfo requestInfo,
-            Demand demand) {
-
-        StringBuilder url = calculatorUtil.getFetchBillURL(
-                demand.getTenantId(),
-                demand.getConsumerCode());
-
-        Object result = serviceRequestRepository.fetchResult(
-                url,
-                RequestInfoWrapper.builder()
-                        .requestInfo(requestInfo)
-                        .build());
-
-        if (result == null) {
-            throw new IllegalStateException(
-                    "Billing-service returned null bill response for "
-                            + demand.getConsumerCode());
-        }
-
-        /*
-         * Emit the same payment trigger used by the existing generic
-         * DemandService.fetchBill() flow. This is notification/event handling,
-         * not demand or bill creation itself.
-         */
-        Map<String, Object> billResponse = new HashMap<>();
-        billResponse.put("requestInfo", requestInfo);
-        billResponse.put("billResponse", result);
-        wsCalculationProducer.push(
-                config.getPayTriggers(),
-                billResponse);
-
-        String billId = extractBillId(result);
-
-        if (!StringUtils.hasText(billId)) {
-            throw new IllegalStateException(
-                    "Billing-service returned bill response without bill id for "
-                            + demand.getConsumerCode());
-        }
-
-        return billId;
-    }
-
-    private String extractBillId(Object response) {
-
-        JsonNode root = objectMapper.valueToTree(response);
-
-        JsonNode billNode = findNodeIgnoreCase(root, "bill");
-
-        if (billNode == null) {
-            billNode = findNodeIgnoreCase(root, "bills");
-        }
-
-        if (billNode == null) {
-            return null;
-        }
-
-        if (billNode.isArray()) {
-            for (JsonNode bill : billNode) {
-                JsonNode id = bill.get("id");
-                if (id != null && !id.isNull()
-                        && StringUtils.hasText(id.asText())) {
-                    return id.asText();
-                }
-            }
-        }
-
-        if (billNode.isObject()) {
-            JsonNode id = billNode.get("id");
-            if (id != null && !id.isNull()
-                    && StringUtils.hasText(id.asText())) {
-                return id.asText();
-            }
-        }
-
-        return null;
-    }
-
-    private JsonNode findNodeIgnoreCase(
-            JsonNode node,
-            String fieldName) {
-
-        if (node == null) {
-            return null;
-        }
-
-        if (node.isObject()) {
-
-            java.util.Iterator<Map.Entry<String, JsonNode>> fields =
-                    node.fields();
-
-            while (fields.hasNext()) {
-                Map.Entry<String, JsonNode> entry = fields.next();
-
-                if (entry.getKey().equalsIgnoreCase(fieldName)) {
-                    return entry.getValue();
-                }
-
-                JsonNode nested =
-                        findNodeIgnoreCase(
-                                entry.getValue(),
-                                fieldName);
-
-                if (nested != null) {
-                    return nested;
-                }
-            }
-        }
-
-        if (node.isArray()) {
-            for (JsonNode child : node) {
-                JsonNode nested =
-                        findNodeIgnoreCase(
-                                child,
-                                fieldName);
-
-                if (nested != null) {
-                    return nested;
-                }
-            }
-        }
-
-        return null;
-    }
-
-    private WaterConnection loadWaterConnection(
-            RequestInfo requestInfo,
-            String connectionNo,
-            String tenantId) {
-
-        List<WaterConnection> connections =
-                calculatorUtil.getWaterConnection(
-                        requestInfo, connectionNo, tenantId);
-
-        if (CollectionUtils.isEmpty(connections)) {
-            throw new IllegalStateException(
-                    "Water connection not found: " + connectionNo);
-        }
-
-        return calculatorUtil.getWaterConnectionObject(connections);
-    }
-
-    private User resolvePayer(
-            WaterConnection connection,
-            Property property) {
-
-        if (!CollectionUtils.isEmpty(
-                connection.getConnectionHolders())) {
-            return connection.getConnectionHolders()
-                    .get(0)
-                    .toCommonUser();
-        }
-
-        if (!CollectionUtils.isEmpty(property.getOwners())) {
-            return property.getOwners()
-                    .get(0)
-                    .toCommonUser();
-        }
-
-        throw new IllegalStateException(
-                "No owner/payer found for water connection "
-                        + connection.getConnectionNo());
-    }
-
-    private String resolveTariffCategory(
-            WaterConnection connection,
-            Property property) {
-
-        String candidate = connection.getConnectionCategory();
-
-        if (!StringUtils.hasText(candidate)) {
-            candidate = property.getUsageCategory();
-        }
-
-        if (!StringUtils.hasText(candidate)) {
-            throw new IllegalStateException(
-                    "Cannot determine DJB tariff category for "
-                            + connection.getConnectionNo());
-        }
-
-        String normalized = candidate.trim()
-                .replace("-", "_")
-                .replace(" ", "_")
-                .toUpperCase();
-
-        if (normalized.contains("DOMESTIC")
-                || normalized.contains("RESIDENTIAL")
-                || normalized.contains("CAT_I")) {
-            return "DOMESTIC";
-        }
-
-        if (normalized.contains("COMMERCIAL")
-                || normalized.contains("NON_DOMESTIC")
-                || normalized.contains("CAT_II")
-                || normalized.contains("BUSINESS")) {
-            return "COMMERCIAL";
-        }
-
-        throw new IllegalStateException(
-                "Unsupported DJB tariff category: " + candidate);
-    }
-
-    private boolean isDomestic(
-            WaterBillingCycle cycle,
-            RequestInfo requestInfo) {
-
-        try {
-            WaterConnection connection =
-                    loadWaterConnection(
-                            requestInfo,
-                            cycle.getConnectionno(),
-                            cycle.getTenantid());
-
-            String category = connection.getConnectionCategory();
-
-            return category != null
-                    && (category.toUpperCase().contains("DOMESTIC")
-                    || category.toUpperCase().contains("RESIDENTIAL")
-                    || category.toUpperCase().contains("CAT_I"));
-        } catch (RuntimeException ex) {
-            return false;
-        }
-    }
-
-    private boolean isAdditionalWaterSource(
-            WaterConnection connection) {
-
-        String source = connection.getWaterSource();
-
-        return source != null
-                && (source.toUpperCase().contains("BORE")
-                || source.toUpperCase().contains("BOREWELL"));
-    }
-
-    private Map<String, Object> buildAdditionalDetails(
-            WaterBillingCycle cycle,
-            String category,
-            BigDecimal grossAmount,
-            BigDecimal rebateAmount,
-            BigDecimal netAmount,
-            String propertyId) {
-
-        Map<String, Object> details = new HashMap<>();
-        details.put("djbBillingCycleId", cycle.getId());
-        details.put("djbBillingBasis",
-                cycle.getBillingbasis() == null
-                        ? null
-                        : cycle.getBillingbasis().toString());
-        details.put("readingQualityCode",
-                cycle.getReadingqualitycode());
-        details.put("billingPeriodFrom",
-                cycle.getBillingperiodfrom());
-        details.put("billingPeriodTo",
-                cycle.getBillingperiodto());
-        details.put("tariffCategory", category);
-        details.put("grossAmount", grossAmount);
-        details.put("rebateAmount", rebateAmount);
-        details.put("netAmount", netAmount);
-        details.put("propertyId", propertyId);
-
-        return details;
-    }
-
-    private void validateCycle(WaterBillingCycle cycle) {
-
-        if (cycle == null) {
-            throw new IllegalArgumentException(
-                    "Billing cycle is required");
-        }
-
-        if (!StringUtils.hasText(cycle.getTenantid())
-                || !StringUtils.hasText(cycle.getConnectionno())) {
-            throw new IllegalArgumentException(
-                    "Billing cycle tenant and connection are required");
-        }
-
-        if (cycle.getBillingperiodfrom() == null
-                || cycle.getBillingperiodto() == null) {
-            throw new IllegalArgumentException(
-                    "Billing period is required");
-        }
-    }
-
-    @lombok.Builder
-    @lombok.Data
-    public static class DemandResult {
-        private boolean demandCreated;
-        private boolean zroRequired;
-        private Demand demand;
-        private String billId;
-        private BigDecimal grossAmount;
-        private BigDecimal rebateAmount;
-        private BigDecimal netAmount;
-        private String message;
-    }
+	private static final int MONEY_SCALE = 2;
+
+	private final DJBMonthlyBillingMasterProvider masterProvider;
+	private final TariffCalculationService tariffCalculationService;
+	private final SewerageCalculationService sewerageCalculationService;
+	private final RebateCalculationService rebateCalculationService;
+	private final DemandRepository demandRepository;
+	private final CalculatorUtil calculatorUtil;
+	private final WSCalculationUtil wsCalculationUtil;
+	private final WSCalculationConfiguration config;
+	private final ServiceRequestRepository serviceRequestRepository;
+	private final ObjectMapper objectMapper;
+	private final WSCalculationProducer wsCalculationProducer;
+
+	public DJBMonthlyDemandService(DJBMonthlyBillingMasterProvider masterProvider,
+			TariffCalculationService tariffCalculationService, SewerageCalculationService sewerageCalculationService,
+			RebateCalculationService rebateCalculationService, DemandRepository demandRepository,
+			CalculatorUtil calculatorUtil, WSCalculationUtil wsCalculationUtil, WSCalculationConfiguration config,
+			ServiceRequestRepository serviceRequestRepository, ObjectMapper objectMapper,
+			WSCalculationProducer wsCalculationProducer) {
+
+		this.masterProvider = masterProvider;
+		this.tariffCalculationService = tariffCalculationService;
+		this.sewerageCalculationService = sewerageCalculationService;
+		this.rebateCalculationService = rebateCalculationService;
+		this.demandRepository = demandRepository;
+		this.calculatorUtil = calculatorUtil;
+		this.wsCalculationUtil = wsCalculationUtil;
+		this.config = config;
+		this.serviceRequestRepository = serviceRequestRepository;
+		this.objectMapper = objectMapper;
+		this.wsCalculationProducer = wsCalculationProducer;
+	}
+
+	/**
+	 * Creates a generic UPYOG Demand from the already calculated DJB billing cycle.
+	 * This service owns only DJB rule calculation and mapping. The generic
+	 * billing-service remains untouched.
+	 *
+	 * After demand creation, the generic billing-service bill fetch API is invoked
+	 * for normal (non-ZRO, non-pending-correction) cycles. The billing-service
+	 * remains completely generic.
+	 */
+	public DemandResult createDemand(RequestInfo requestInfo, WaterBillingCycle cycle) {
+
+		validateCycle(cycle);
+
+		// Idempotency: the same billing cycle must never create a second demand.
+		if (org.springframework.util.StringUtils.hasText(cycle.getDemandid())) {
+			return DemandResult.builder().demandCreated(true).zroRequired(false)
+					.message("DJB demand already exists for billing cycle").build();
+		}
+
+		if (Boolean.TRUE.equals(cycle.getOnepointfivexflag()) && isDomestic(cycle, requestInfo)) {
+			cycle.setZrostatus(ZroStatus.PENDING);
+			cycle.setZroremarks("Consumption exceeds DJB 1.5x threshold; ZRO verification required");
+			cycle.setStatus(BillingCycleStatus.CALCULATED);
+
+			return DemandResult.builder().demandCreated(false).zroRequired(true)
+					.message("Demand not generated because DJB 1.5x ZRO verification is required").build();
+		}
+
+		BigDecimal consumption = cycle.getBillingconsumption();
+		if (consumption == null) {
+			throw new IllegalStateException("Billing consumption is required before demand generation");
+		}
+
+		String tenantId = cycle.getTenantid();
+		String connectionNo = cycle.getConnectionno();
+
+		WaterConnection connection = loadWaterConnection(requestInfo, connectionNo, tenantId);
+
+		Property property = wsCalculationUtil.getProperty(
+				WaterConnectionRequest.builder().requestInfo(requestInfo).waterConnection(connection).build());
+
+		String category = resolveTariffCategory(connection, property);
+
+		List<DJBMonthlyWaterTariff> tariffs = masterProvider.getWaterTariffs(requestInfo, tenantId);
+
+		TariffCalculationResult water = tariffCalculationService.calculate(consumption, category, tariffs);
+
+		SewerageCalculationContext sewerageContext = SewerageCalculationContext.builder()
+				.waterVolumetricCharge(water.getWaterVolumetricCharge()).waterConnectionAvailable(true)
+				.sewerConnectionAvailable(true).additionalWaterSource(isAdditionalWaterSource(connection))
+				.consumerCategory(category).propertyUsage(property.getUsageCategory())
+				.builtUpAreaSqm(property.getSuperBuiltUpArea()).build();
+
+		List<DJBMonthlySewerageRule> sewerageRules = masterProvider.getSewerageRules(requestInfo, tenantId);
+
+		List<DJBAdditionalSewerageCharge> additionalSewerageRules = masterProvider
+				.getAdditionalSewerageCharges(requestInfo, tenantId);
+
+		SewerageCalculationResult sewerage = sewerageCalculationService.calculate(sewerageContext, sewerageRules,
+				additionalSewerageRules);
+
+		BigDecimal grossAmount = water.getTotalWaterCharge().add(sewerage.getTotalSewerageCharge())
+				.setScale(MONEY_SCALE, RoundingMode.HALF_UP);
+
+		List<DJBMonthlyRebate> rebates = masterProvider.getRebates(requestInfo, tenantId);
+
+		RebateCalculationContext rebateContext = RebateCalculationContext.builder().consumption(consumption)
+				.billingBasis(cycle.getBillingbasis()).readingQualityCode(cycle.getReadingqualitycode())
+				.consumerType(category).propertyCategory(category).connectionType(category).bulkConnection(false)
+				.propertyAreaSqm(property.getSuperBuiltUpArea()).functionalRwh(false)
+				.functionalWastewaterRecycling(false).totalBillBeforeRebate(grossAmount)
+				.freeWaterEligibleAmount(water.getTotalWaterCharge()).build();
+
+		RebateCalculationResult rebate = rebateCalculationService.calculate(rebateContext, rebates);
+
+		BigDecimal netAmount = grossAmount.subtract(rebate.getTotalRebate()).setScale(MONEY_SCALE,
+				RoundingMode.HALF_UP);
+
+		if (netAmount.signum() < 0) {
+			throw new IllegalStateException("DJB net demand amount cannot be negative: " + netAmount);
+		}
+
+		List<DemandDetail> demandDetails = new java.util.ArrayList<>();
+
+		/*
+		 * Current generic WS tax-head contract contains WS_CHARGE and WS_TIME_REBATE.
+		 * We keep the complete gross water + sewer amount in WS_CHARGE, and represent
+		 * DJB rebates as a negative WS_TIME_REBATE.
+		 *
+		 * We do not invent a DJB-specific tax head because billing-service owns generic
+		 * tax-head masters.
+		 */
+		if (grossAmount.signum() > 0) {
+			demandDetails.add(DemandDetail.builder().taxHeadMasterCode(WSCalculationConstant.WS_CHARGE)
+					.taxAmount(grossAmount).collectionAmount(BigDecimal.ZERO).tenantId(tenantId).build());
+		}
+
+		if (rebate.getTotalRebate().signum() > 0) {
+			demandDetails.add(DemandDetail.builder().taxHeadMasterCode(WSCalculationConstant.WS_TIME_REBATE)
+					.taxAmount(rebate.getTotalRebate().negate().setScale(MONEY_SCALE, RoundingMode.HALF_UP))
+					.collectionAmount(BigDecimal.ZERO).tenantId(tenantId).build());
+		}
+
+		if (demandDetails.isEmpty()) {
+			throw new IllegalStateException("No positive DJB demand detail could be generated");
+		}
+
+		User payer = resolvePayer(connection, property);
+
+		Long taxPeriodFrom = cycle.getBillingperiodfrom();
+		if (CorrectionStatus.PENDING.equals(cycle.getCorrectionstatus()) && cycle.getPreviousokreadingdate() != null) {
+			/*
+			 * DJB automatic correction is a single actual demand from the previous OK
+			 * reading to the current OK reading.
+			 */
+			taxPeriodFrom = cycle.getPreviousokreadingdate();
+		}
+
+		Demand demand = Demand.builder().tenantId(tenantId).consumerCode(connectionNo).consumerType("waterConnection")
+				.businessService(config.getBusinessService()).payer(payer).taxPeriodFrom(taxPeriodFrom)
+				.taxPeriodTo(cycle.getBillingperiodto()).demandDetails(demandDetails)
+				.minimumAmountPayable(config.getMinimumPayableAmount())
+				.billExpiryTime(config.getDemandBillExpiryTime() == null ? null
+						: System.currentTimeMillis() + config.getDemandBillExpiryTime())
+				.status(Demand.StatusEnum.ACTIVE).additionalDetails(buildAdditionalDetails(cycle, category, grossAmount,
+						rebate.getTotalRebate(), netAmount, property.getPropertyId()))
+				.build();
+
+		DemandNotificationObj notification = DemandNotificationObj.builder().requestInfo(requestInfo).tenantId(tenantId)
+				.waterConnectionIds(Collections.singleton(connectionNo))
+				.billingCycle(WSCalculationConstant.Monthly_Billing_Period).build();
+
+		List<Demand> response = demandRepository.saveDemand(requestInfo, Collections.singletonList(demand),
+				notification);
+
+		if (CollectionUtils.isEmpty(response) || response.get(0) == null
+				|| !StringUtils.hasText(response.get(0).getId())) {
+			throw new IllegalStateException("Billing-service returned no demand id for " + connectionNo);
+		}
+
+		Demand created = response.get(0);
+
+		/*
+		 * Follow the same generic UPYOG pattern as the existing
+		 * DemandService.createDemand(): after a normal demand is created, fetchBill()
+		 * is invoked. 1.5x/ZRO and pending automatic-correction cycles deliberately do
+		 * not enter this ordinary bill path.
+		 */
+		String billId = null;
+		if (!CorrectionStatus.PENDING.equals(cycle.getCorrectionstatus())) {
+			billId = fetchAndGetBillId(requestInfo, created);
+		}
+
+		return DemandResult.builder().demandCreated(true).zroRequired(false).demand(created).billId(billId)
+				.grossAmount(grossAmount).rebateAmount(rebate.getTotalRebate()).netAmount(netAmount)
+				.message(StringUtils.hasText(billId) ? "DJB demand and bill created successfully"
+						: "DJB demand created successfully")
+				.build();
+	}
+
+	/**
+	 * Uses the same generic UPYOG bill-fetch contract used by the existing water
+	 * calculation flow:
+	 *
+	 * POST {billing-service}/bill/v2/_fetchbill ?tenantId=... &consumerCode=...
+	 * &businessService=WS
+	 *
+	 * The endpoint searches an existing bill and generates one when there is no
+	 * valid bill for the criteria.
+	 */
+	private String fetchAndGetBillId(RequestInfo requestInfo, Demand demand) {
+
+		StringBuilder url = calculatorUtil.getFetchBillURL(demand.getTenantId(), demand.getConsumerCode());
+
+		Object result = serviceRequestRepository.fetchResult(url,
+				RequestInfoWrapper.builder().requestInfo(requestInfo).build());
+
+		if (result == null) {
+			throw new IllegalStateException(
+					"Billing-service returned null bill response for " + demand.getConsumerCode());
+		}
+
+		/*
+		 * Emit the same payment trigger used by the existing generic
+		 * DemandService.fetchBill() flow. This is notification/event handling, not
+		 * demand or bill creation itself.
+		 */
+		Map<String, Object> billResponse = new HashMap<>();
+		billResponse.put("requestInfo", requestInfo);
+		billResponse.put("billResponse", result);
+		wsCalculationProducer.push(config.getPayTriggers(), billResponse);
+
+		String billId = extractBillId(result);
+
+		if (!StringUtils.hasText(billId)) {
+			throw new IllegalStateException(
+					"Billing-service returned bill response without bill id for " + demand.getConsumerCode());
+		}
+
+		return billId;
+	}
+
+	private String extractBillId(Object response) {
+
+		JsonNode root = objectMapper.valueToTree(response);
+
+		JsonNode billNode = findNodeIgnoreCase(root, "bill");
+
+		if (billNode == null) {
+			billNode = findNodeIgnoreCase(root, "bills");
+		}
+
+		if (billNode == null) {
+			return null;
+		}
+
+		if (billNode.isArray()) {
+			for (JsonNode bill : billNode) {
+				JsonNode id = bill.get("id");
+				if (id != null && !id.isNull() && StringUtils.hasText(id.asText())) {
+					return id.asText();
+				}
+			}
+		}
+
+		if (billNode.isObject()) {
+			JsonNode id = billNode.get("id");
+			if (id != null && !id.isNull() && StringUtils.hasText(id.asText())) {
+				return id.asText();
+			}
+		}
+
+		return null;
+	}
+
+	private JsonNode findNodeIgnoreCase(JsonNode node, String fieldName) {
+
+		if (node == null) {
+			return null;
+		}
+
+		if (node.isObject()) {
+
+			java.util.Iterator<Map.Entry<String, JsonNode>> fields = node.fields();
+
+			while (fields.hasNext()) {
+				Map.Entry<String, JsonNode> entry = fields.next();
+
+				if (entry.getKey().equalsIgnoreCase(fieldName)) {
+					return entry.getValue();
+				}
+
+				JsonNode nested = findNodeIgnoreCase(entry.getValue(), fieldName);
+
+				if (nested != null) {
+					return nested;
+				}
+			}
+		}
+
+		if (node.isArray()) {
+			for (JsonNode child : node) {
+				JsonNode nested = findNodeIgnoreCase(child, fieldName);
+
+				if (nested != null) {
+					return nested;
+				}
+			}
+		}
+
+		return null;
+	}
+
+	private WaterConnection loadWaterConnection(RequestInfo requestInfo, String connectionNo, String tenantId) {
+
+		List<WaterConnection> connections = calculatorUtil.getWaterConnection(requestInfo, connectionNo, tenantId);
+
+		if (CollectionUtils.isEmpty(connections)) {
+			throw new IllegalStateException("Water connection not found: " + connectionNo);
+		}
+
+		return calculatorUtil.getWaterConnectionObject(connections);
+	}
+
+	private User resolvePayer(WaterConnection connection, Property property) {
+
+		if (!CollectionUtils.isEmpty(connection.getConnectionHolders())) {
+			return connection.getConnectionHolders().get(0).toCommonUser();
+		}
+
+		if (!CollectionUtils.isEmpty(property.getOwners())) {
+			return property.getOwners().get(0).toCommonUser();
+		}
+
+		throw new IllegalStateException("No owner/payer found for water connection " + connection.getConnectionNo());
+	}
+
+	private String resolveTariffCategory(WaterConnection connection, Property property) {
+
+		String candidate = connection.getConnectionCategory();
+
+		if (!StringUtils.hasText(candidate)) {
+			candidate = property.getUsageCategory();
+		}
+
+		if (!StringUtils.hasText(candidate)) {
+			throw new IllegalStateException("Cannot determine DJB tariff category for " + connection.getConnectionNo());
+		}
+
+		String normalized = candidate.trim().replace("-", "_").replace(" ", "_").toUpperCase();
+
+		if (normalized.contains("DOMESTIC") || normalized.contains("RESIDENTIAL") || normalized.contains("CAT_I")) {
+			return "DOMESTIC";
+		}
+
+		if (normalized.contains("COMMERCIAL") || normalized.contains("NON_DOMESTIC") || normalized.contains("CAT_II")
+				|| normalized.contains("BUSINESS")) {
+			return "COMMERCIAL";
+		}
+
+		throw new IllegalStateException("Unsupported DJB tariff category: " + candidate);
+	}
+
+	private boolean isDomestic(WaterBillingCycle cycle, RequestInfo requestInfo) {
+
+		try {
+			WaterConnection connection = loadWaterConnection(requestInfo, cycle.getConnectionno(), cycle.getTenantid());
+
+			String category = connection.getConnectionCategory();
+
+			return category != null && (category.toUpperCase().contains("DOMESTIC")
+					|| category.toUpperCase().contains("RESIDENTIAL") || category.toUpperCase().contains("CAT_I"));
+		} catch (RuntimeException ex) {
+			return false;
+		}
+	}
+
+	private boolean isAdditionalWaterSource(WaterConnection connection) {
+
+		String source = connection.getWaterSource();
+
+		return source != null && (source.toUpperCase().contains("BORE") || source.toUpperCase().contains("BOREWELL"));
+	}
+
+	private Map<String, Object> buildAdditionalDetails(WaterBillingCycle cycle, String category, BigDecimal grossAmount,
+			BigDecimal rebateAmount, BigDecimal netAmount, String propertyId) {
+
+		Map<String, Object> details = new HashMap<>();
+		details.put("djbBillingCycleId", cycle.getId());
+		details.put("djbBillingBasis", cycle.getBillingbasis() == null ? null : cycle.getBillingbasis().toString());
+		details.put("readingQualityCode", cycle.getReadingqualitycode());
+		details.put("billingPeriodFrom", cycle.getBillingperiodfrom());
+		details.put("billingPeriodTo", cycle.getBillingperiodto());
+		details.put("tariffCategory", category);
+		details.put("grossAmount", grossAmount);
+		details.put("rebateAmount", rebateAmount);
+		details.put("netAmount", netAmount);
+		details.put("propertyId", propertyId);
+
+		return details;
+	}
+
+	private void validateCycle(WaterBillingCycle cycle) {
+
+		if (cycle == null) {
+			throw new IllegalArgumentException("Billing cycle is required");
+		}
+
+		if (!StringUtils.hasText(cycle.getTenantid()) || !StringUtils.hasText(cycle.getConnectionno())) {
+			throw new IllegalArgumentException("Billing cycle tenant and connection are required");
+		}
+
+		if (cycle.getBillingperiodfrom() == null || cycle.getBillingperiodto() == null) {
+			throw new IllegalArgumentException("Billing period is required");
+		}
+	}
+
+	@lombok.Builder
+	@lombok.Data
+	public static class DemandResult {
+		private boolean demandCreated;
+		private boolean zroRequired;
+		private Demand demand;
+		private String billId;
+		private BigDecimal grossAmount;
+		private BigDecimal rebateAmount;
+		private BigDecimal netAmount;
+		private String message;
+	}
 }
