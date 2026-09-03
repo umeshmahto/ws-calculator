@@ -354,6 +354,68 @@ public class DJBMonthlyDemandService {
 		return null;
 	}
 
+
+	/**
+	 * Fetches a bill for a demand that has already been created.
+	 *
+	 * This is used by the DJB automatic-correction flow after the final
+	 * corrected-actual demand already exists. It deliberately reuses the
+	 * existing generic UPYOG billing-service /_fetchbill contract and does
+	 * not create another Demand.
+	 */
+	public String fetchBillForExistingDemand(RequestInfo requestInfo, Demand demand) {
+
+		if (demand == null || !StringUtils.hasText(demand.getTenantId())
+				|| !StringUtils.hasText(demand.getConsumerCode())) {
+			throw new IllegalArgumentException(
+					"TenantId and consumerCode are required to fetch bill for existing demand");
+		}
+
+		return fetchAndGetBillId(requestInfo, demand);
+	}
+
+	/**
+	 * Fetches the bill for an already-created DJB demand when the Demand object
+	 * itself is not available (for example, an idempotent retry after demand
+	 * creation). The generic _fetchbill endpoint searches by tenant, consumer
+	 * and WS business service, so no second Demand is created here.
+	 */
+	public String fetchBillForExistingDemand(
+			RequestInfo requestInfo,
+			String tenantId,
+			String connectionNo) {
+
+		if (!StringUtils.hasText(tenantId) || !StringUtils.hasText(connectionNo)) {
+			throw new IllegalArgumentException(
+					"TenantId and connectionNo are required to fetch an existing DJB bill");
+		}
+
+		StringBuilder url = calculatorUtil.getFetchBillURL(tenantId, connectionNo);
+
+		Object result = serviceRequestRepository.fetchResult(
+				url,
+				RequestInfoWrapper.builder().requestInfo(requestInfo).build());
+
+		if (result == null) {
+			throw new IllegalStateException(
+					"Billing-service returned null bill response for " + connectionNo);
+		}
+
+		Map<String, Object> billResponse = new HashMap<>();
+		billResponse.put("requestInfo", requestInfo);
+		billResponse.put("billResponse", result);
+		wsCalculationProducer.push(config.getPayTriggers(), billResponse);
+
+		String billId = extractBillId(result);
+
+		if (!StringUtils.hasText(billId)) {
+			throw new IllegalStateException(
+					"Billing-service returned bill response without bill id for " + connectionNo);
+		}
+
+		return billId;
+	}
+
 	private WaterConnection loadWaterConnection(RequestInfo requestInfo, String connectionNo, String tenantId) {
 
 		List<WaterConnection> connections = calculatorUtil.getWaterConnection(requestInfo, connectionNo, tenantId);
