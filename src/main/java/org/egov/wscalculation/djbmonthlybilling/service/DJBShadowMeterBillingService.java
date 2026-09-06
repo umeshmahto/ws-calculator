@@ -12,6 +12,7 @@ import org.egov.wscalculation.djbmonthlybilling.model.enums.CorrectionStatus;
 import org.egov.wscalculation.djbmonthlybilling.model.master.DJBMonthlyBillingRule;
 import org.egov.wscalculation.djbmonthlybilling.model.master.DJBReadingQualityCode;
 import org.egov.wscalculation.djbmonthlybilling.repository.WaterBillingCycleDao;
+import org.egov.wscalculation.djbmonthlybilling.service.CorrectionService.CorrectionPlanResult;
 import org.egov.wscalculation.djbmonthlybilling.service.dto.BillingBasisDecision;
 import org.egov.wscalculation.djbmonthlybilling.service.dto.ConsumptionResult;
 import org.egov.wscalculation.djbmonthlybilling.service.dto.MonthlyBillingCalculationResult;
@@ -19,7 +20,6 @@ import org.egov.wscalculation.djbmonthlybilling.service.master.DJBMonthlyBilling
 import org.egov.wscalculation.service.MeterService;
 import org.egov.wscalculation.web.models.MeterConnectionRequest;
 import org.egov.wscalculation.web.models.MeterReading;
-import org.egov.wscalculation.djbmonthlybilling.service.CorrectionService.CorrectionPlanResult;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -176,8 +176,8 @@ public class DJBShadowMeterBillingService {
 		CorrectionPlanResult correction = null;
 
 		if (BillingBasis.ACTUAL.equals(cycle.getBillingbasis())) {
-			correction = correctionService.processAutomaticCorrection(tenantId, cycle,
-					actor(requestInfo), System.currentTimeMillis());
+			correction = correctionService.processAutomaticCorrection(tenantId, cycle, actor(requestInfo),
+					System.currentTimeMillis());
 
 			if (correction != null && correction.isCorrectionRequired()) {
 				cycle.setCorrectionstatus(CorrectionStatus.PENDING);
@@ -193,45 +193,58 @@ public class DJBShadowMeterBillingService {
 
 		if (demandResult.isDemandCreated()) {
 
-			if (demandResult.getDemand() != null
-					&& StringUtils.hasText(demandResult.getDemand().getId())) {
+			if (demandResult.getDemand() != null && StringUtils.hasText(demandResult.getDemand().getId())) {
 				cycle.setDemandid(demandResult.getDemand().getId());
 			}
 
 			/*
 			 * Normal ACTUAL/AVERAGE cycles already receive their bill from
-			 * DJBMonthlyDemandService. A pending automatic correction deliberately
-			 * skips that ordinary bill path because the final OK cycle must first
-			 * complete the correction span.
+			 * DJBMonthlyDemandService. A pending automatic correction deliberately skips
+			 * that ordinary bill path because the final OK cycle must first complete the
+			 * correction span.
 			 *
-			 * Once the final corrected demand exists, we can safely call the same
-			 * generic UPYOG _fetchbill endpoint. No second Demand is created.
+			 * Once the final corrected demand exists, we can safely call the same generic
+			 * UPYOG _fetchbill endpoint. No second Demand is created.
 			 */
 			if (CorrectionStatus.PENDING.equals(cycle.getCorrectionstatus())) {
+
+				/*
+				 * The corrected demand must be created first, but the final bill must only
+				 * see that demand as billable. Therefore cancel every superseded demand
+				 * before invoking the generic UPYOG _fetchbill endpoint.
+				 *
+				 * This is intentionally kept in ws-calculator. billing-service remains
+				 * generic and is only asked to create/update demands and fetch the bill.
+				 */
+				if (correction != null && correction.getPlan() != null) {
+					/*
+					 * The corrected demand was created through billing-service immediately above.
+					 * Its generic demand-create lifecycle already expires the previous active bill.
+					 * Therefore correction only needs to cancel superseded demands here; it must not
+					 * call /bill/v2/_cancelbill for the already-historical bill chain.
+					 */
+					correctionService.deactivateSupersededDemands(
+							requestInfo, tenantId, correction.getPlan());
+				}
 
 				if (!StringUtils.hasText(cycle.getBillid())) {
 					try {
 						String correctedBillId;
 
 						if (demandResult.getDemand() != null) {
-							correctedBillId = demandService.fetchBillForExistingDemand(
-									requestInfo,
+							correctedBillId = demandService.fetchBillForExistingDemand(requestInfo,
 									demandResult.getDemand());
 						} else {
 							/*
-							 * Idempotent retry: the demand was created in a previous
-							 * attempt, so reuse the cycle's Demand ID and only fetch
-							 * the missing bill.
+							 * Idempotent retry: the demand was created in a previous attempt, so reuse the
+							 * cycle's Demand ID and only fetch the missing bill.
 							 */
 							if (!StringUtils.hasText(cycle.getDemandid())) {
 								throw new IllegalStateException(
-										"Pending DJB correction has no demand id for "
-												+ connectionNo);
+										"Pending DJB correction has no demand id for " + connectionNo);
 							}
 
-							correctedBillId = demandService.fetchBillForExistingDemand(
-									requestInfo,
-									tenantId,
+							correctedBillId = demandService.fetchBillForExistingDemand(requestInfo, tenantId,
 									connectionNo);
 						}
 
@@ -240,40 +253,30 @@ public class DJBShadowMeterBillingService {
 							cycle.setStatus(BillingCycleStatus.BILL_GENERATED);
 
 							if (correction != null && correction.getPlan() != null) {
-								correctionService.completeAutomaticCorrection(
-										tenantId,
-										correction.getPlan(),
-										cycle.getDemandid(),
-										correctedBillId,
-										actor(requestInfo),
+								correctionService.completeAutomaticCorrection(tenantId, correction.getPlan(),
+										cycle.getDemandid(), correctedBillId, actor(requestInfo),
 										System.currentTimeMillis());
 								cycle.setCorrectionstatus(CorrectionStatus.COMPLETED);
 							}
 						}
 					} catch (RuntimeException ex) {
 						/*
-						 * Do not rollback the already-created external Demand merely
-						 * because bill generation failed. Keep the correction PENDING
-						 * and the Demand ID so a later retry can generate only the
-						 * missing bill.
+						 * Do not rollback the already-created external Demand merely because bill
+						 * generation failed. Keep the correction PENDING and the Demand ID so a later
+						 * retry can generate only the missing bill.
 						 */
 						cycle.setStatus(BillingCycleStatus.DEMAND_CREATED);
 						cycle.setCorrectionstatus(CorrectionStatus.PENDING);
 					}
 				} else {
 					/*
-					 * The corrected bill was generated in an earlier attempt.
-					 * Complete the local correction transaction idempotently.
+					 * The corrected bill was generated in an earlier attempt. Complete the local
+					 * correction transaction idempotently.
 					 */
 					cycle.setStatus(BillingCycleStatus.BILL_GENERATED);
 					if (correction != null && correction.getPlan() != null) {
-						correctionService.completeAutomaticCorrection(
-								tenantId,
-								correction.getPlan(),
-								cycle.getDemandid(),
-								cycle.getBillid(),
-								actor(requestInfo),
-								System.currentTimeMillis());
+						correctionService.completeAutomaticCorrection(tenantId, correction.getPlan(),
+								cycle.getDemandid(), cycle.getBillid(), actor(requestInfo), System.currentTimeMillis());
 						cycle.setCorrectionstatus(CorrectionStatus.COMPLETED);
 					}
 				}
@@ -282,9 +285,8 @@ public class DJBShadowMeterBillingService {
 				cycle.setStatus(BillingCycleStatus.BILL_GENERATED);
 			} else if (StringUtils.hasText(cycle.getBillid())) {
 				/*
-				 * Preserve an already-generated bill on an idempotent repeat of
-				 * the same billing period. Do not regress BILL_GENERATED back to
-				 * DEMAND_CREATED.
+				 * Preserve an already-generated bill on an idempotent repeat of the same
+				 * billing period. Do not regress BILL_GENERATED back to DEMAND_CREATED.
 				 */
 				cycle.setStatus(BillingCycleStatus.BILL_GENERATED);
 			} else {

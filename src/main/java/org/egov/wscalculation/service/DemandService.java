@@ -617,9 +617,25 @@ public class DemandService {
 		consumerCodeToDemandMap.forEach((id, demand) ->{
 			log.info(" In Demand Loop +++++++");
 			if (demand.getStatus() != null
-					&& WSCalculationConstant.DEMAND_CANCELLED_STATUS.equalsIgnoreCase(demand.getStatus().toString()))
+					&& WSCalculationConstant.DEMAND_CANCELLED_STATUS.equalsIgnoreCase(demand.getStatus().toString())) {
+				/*
+				 * DJB automatic correction intentionally cancels superseded historical demands.
+				 * The generic billing-service _fetchbill flow can call this method with those
+				 * cancelled demands because its expired-bill callback searches by consumer code.
+				 * They are historical/non-billable and must be ignored here.
+				 *
+				 * IMPORTANT: identify DJB monthly demands by the stable consumer-code namespace
+				 * rather than additionalDetails. additionalDetails is not a safe discriminator for
+				 * this callback path because the payload can be transformed between services.
+				 */
+				if (isDjbMonthlyDemand(demand)) {
+					log.info("[DJB-CORRECTION] Skipping cancelled historical demand: id={}, consumerCode={}, businessService={}",
+							demand.getId(), demand.getConsumerCode(), demand.getBusinessService());
+					return;
+				}
 				throw new CustomException(WSCalculationConstant.EG_WS_INVALID_DEMAND_ERROR,
 						WSCalculationConstant.EG_WS_INVALID_DEMAND_ERROR_MSG);
+			}
 			User owner = getPlainOwnerDetails(requestInfo,demand.getPayer().getUuid(), tenantId);
 			demand.setPayer(owner);
 			applyTimeBasedApplicables(demand, requestInfoWrapper, timeBasedExemptionMasterMap, taxPeriods);
@@ -633,6 +649,19 @@ public class DemandService {
 		repository.fetchResult(utils.getUpdateDemandUrl(), request);
 		return demandsToBeUpdated;
 
+	}
+
+	private boolean isDjbMonthlyDemand(Demand demand) {
+		if (demand == null || StringUtils.isBlank(demand.getConsumerCode())) {
+			return false;
+		}
+
+		/*
+		 * DJB monthly water consumers use the dedicated WS/DJB/{FY}/{KNO} namespace.
+		 * This is the most stable module-level discriminator available on both the
+		 * normal demand response and the billing-service expired-bill callback.
+		 */
+		return StringUtils.startsWithIgnoreCase(demand.getConsumerCode().trim(), "WS/DJB/");
 	}
 
 	/**
