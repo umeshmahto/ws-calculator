@@ -106,14 +106,15 @@ public class DJBMonthlyBillingQueryBuilder {
     public String insertCorrection() {
         return "INSERT INTO eg_ws_billingcorrection (" +
                 "id, tenantid, connectionno, frombillingcycleid, tobillingcycleid, status, reason, " +
-                "paidadjustmentamount, olddemandid, oldbillid, correcteddemandid, correctedbillid, createdby, createdtime, " +
-                "lastmodifiedby, lastmodifiedtime) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                "paidadjustmentamount, appliedpaidadjustmentamount, residualpaidcreditamount, olddemandid, oldbillid, " +
+                "correcteddemandid, correctedbillid, createdby, createdtime, lastmodifiedby, lastmodifiedtime) " +
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? )";
     }
 
     public String updateCorrection() {
         return "UPDATE eg_ws_billingcorrection SET connectionno = ?, frombillingcycleid = ?, tobillingcycleid = ?, " +
-                "status = ?, reason = ?, paidadjustmentamount = ?, olddemandid = ?, oldbillid = ?, " +
-                "correcteddemandid = ?, correctedbillid = ?, lastmodifiedby = ?, lastmodifiedtime = ? " +
+                "status = ?, reason = ?, paidadjustmentamount = ?, appliedpaidadjustmentamount = ?, residualpaidcreditamount = ?, " +
+                "olddemandid = ?, oldbillid = ?, correcteddemandid = ?, correctedbillid = ?, lastmodifiedby = ?, lastmodifiedtime = ? " +
                 "WHERE tenantid = ? AND id = ?";
     }
 

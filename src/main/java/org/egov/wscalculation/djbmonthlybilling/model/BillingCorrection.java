@@ -17,6 +17,8 @@ public class BillingCorrection {
     private CorrectionStatus status;
     private String reason;
     private BigDecimal paidadjustmentamount;
+    private BigDecimal appliedpaidadjustmentamount;
+    private BigDecimal residualpaidcreditamount;
     private String olddemandid;
     private String oldbillid;
     private String correcteddemandid;

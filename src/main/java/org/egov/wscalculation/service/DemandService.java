@@ -585,6 +585,9 @@ public class DemandService {
 	 */
 	public List<Demand> updateDemands(GetBillCriteria getBillCriteria, RequestInfoWrapper requestInfoWrapper, Boolean isCallFromBulkGen) {
 
+		log.error(
+			    "################ DJB FIX VERSION 2026-09-04 ################"
+			);
 		if (getBillCriteria.getAmountExpected() == null)
 			getBillCriteria.setAmountExpected(BigDecimal.ZERO);
 		RequestInfo requestInfo = requestInfoWrapper.getRequestInfo();
@@ -628,6 +631,12 @@ public class DemandService {
 				 * rather than additionalDetails. additionalDetails is not a safe discriminator for
 				 * this callback path because the payload can be transformed between services.
 				 */
+				log.error(
+					    "################ CANCELLED DEMAND CHECK ################ id={}, code={}, status={} ################",
+					    demand.getId(),
+					    demand.getConsumerCode(),
+					    demand.getStatus()
+					);
 				if (isDjbMonthlyDemand(demand)) {
 					log.info("[DJB-CORRECTION] Skipping cancelled historical demand: id={}, consumerCode={}, businessService={}",
 							demand.getId(), demand.getConsumerCode(), demand.getBusinessService());

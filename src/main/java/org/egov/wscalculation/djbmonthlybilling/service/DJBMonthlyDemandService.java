@@ -172,18 +172,23 @@ public class DJBMonthlyDemandService {
 		BigDecimal baseNetAmount = grossAmount.subtract(rebate.getTotalRebate()).setScale(MONEY_SCALE,
 				RoundingMode.HALF_UP);
 
-		BigDecimal netAmount = baseNetAmount.subtract(paidAdjustment).setScale(MONEY_SCALE,
-				RoundingMode.HALF_UP);
-
 		if (baseNetAmount.signum() < 0) {
 			throw new IllegalStateException("DJB net demand amount cannot be negative: " + baseNetAmount);
 		}
 
-		if (netAmount.signum() < 0) {
-			throw new IllegalStateException(
-					"Paid DJB correction adjustment exceeds corrected bill amount for " + cycle.getConnectionno()
-							+ ". Required credit/refund workflow is not supported by this bill path: " + paidAdjustment);
-		}
+		/*
+		 * A previously paid average/provisional assessment is a credit against the
+		 * corrected OK-to-OK bill. Apply only the amount that can actually settle the
+		 * corrected bill. If more was paid than the corrected amount, retain the
+		 * excess as a separately auditable residual credit instead of creating a
+		 * negative payable demand.
+		 */
+		BigDecimal appliedPaidAdjustment = paidAdjustment.min(baseNetAmount)
+				.setScale(MONEY_SCALE, RoundingMode.HALF_UP);
+		BigDecimal residualPaidCredit = paidAdjustment.subtract(appliedPaidAdjustment)
+				.max(BigDecimal.ZERO).setScale(MONEY_SCALE, RoundingMode.HALF_UP);
+		BigDecimal netAmount = baseNetAmount.subtract(appliedPaidAdjustment).setScale(MONEY_SCALE,
+				RoundingMode.HALF_UP);
 
 		List<DemandDetail> demandDetails = new java.util.ArrayList<>();
 
@@ -205,7 +210,7 @@ public class DJBMonthlyDemandService {
 					.collectionAmount(BigDecimal.ZERO).tenantId(tenantId).build());
 		}
 
-		if (paidAdjustment.signum() > 0) {
+		if (appliedPaidAdjustment.signum() > 0) {
 			/*
 			 * Use the existing generic WS adhoc-rebate tax head rather than inventing a
 			 * DJB-specific financial head. This keeps billing-service generic while making
@@ -213,7 +218,7 @@ public class DJBMonthlyDemandService {
 			 */
 			demandDetails.add(DemandDetail.builder()
 					.taxHeadMasterCode(WSCalculationConstant.WS_TIME_ADHOC_REBATE)
-					.taxAmount(paidAdjustment.negate().setScale(MONEY_SCALE, RoundingMode.HALF_UP))
+					.taxAmount(appliedPaidAdjustment.negate().setScale(MONEY_SCALE, RoundingMode.HALF_UP))
 					.collectionAmount(BigDecimal.ZERO).tenantId(tenantId).build());
 		}
 
@@ -239,7 +244,8 @@ public class DJBMonthlyDemandService {
 				.billExpiryTime(config.getDemandBillExpiryTime() == null ? null
 						: System.currentTimeMillis() + config.getDemandBillExpiryTime())
 				.status(Demand.StatusEnum.ACTIVE).additionalDetails(buildAdditionalDetails(cycle, category, grossAmount,
-						rebate.getTotalRebate(), netAmount, paidAdjustment, property.getPropertyId()))
+						rebate.getTotalRebate(), netAmount, appliedPaidAdjustment, residualPaidCredit,
+						property.getPropertyId()))
 				.build();
 
 		DemandNotificationObj notification = DemandNotificationObj.builder().requestInfo(requestInfo).tenantId(tenantId)
@@ -269,6 +275,8 @@ public class DJBMonthlyDemandService {
 
 		return DemandResult.builder().demandCreated(true).zroRequired(false).demand(created).billId(billId)
 				.grossAmount(grossAmount).rebateAmount(rebate.getTotalRebate()).netAmount(netAmount)
+				.appliedPaidAdjustmentAmount(appliedPaidAdjustment)
+				.residualPaidCreditAmount(residualPaidCredit)
 				.message(StringUtils.hasText(billId) ? "DJB demand and bill created successfully"
 						: "DJB demand created successfully")
 				.build();
@@ -514,7 +522,8 @@ public class DJBMonthlyDemandService {
 	}
 
 	private Map<String, Object> buildAdditionalDetails(WaterBillingCycle cycle, String category, BigDecimal grossAmount,
-			BigDecimal rebateAmount, BigDecimal netAmount, BigDecimal paidAdjustmentAmount, String propertyId) {
+			BigDecimal rebateAmount, BigDecimal netAmount, BigDecimal appliedPaidAdjustmentAmount,
+			BigDecimal residualPaidCreditAmount, String propertyId) {
 
 		Map<String, Object> details = new HashMap<>();
 		details.put("djbBillingCycleId", cycle.getId());
@@ -526,9 +535,12 @@ public class DJBMonthlyDemandService {
 		details.put("grossAmount", grossAmount);
 		details.put("rebateAmount", rebateAmount);
 		details.put("netAmount", netAmount);
-		if (paidAdjustmentAmount != null && paidAdjustmentAmount.signum() > 0) {
-			details.put("paidCorrectionAdjustment", paidAdjustmentAmount);
+		if (appliedPaidAdjustmentAmount != null && appliedPaidAdjustmentAmount.signum() > 0) {
+			details.put("paidCorrectionAdjustment", appliedPaidAdjustmentAmount);
 			details.put("correctionAdjustmentTaxHead", WSCalculationConstant.WS_TIME_ADHOC_REBATE);
+		}
+		if (residualPaidCreditAmount != null && residualPaidCreditAmount.signum() > 0) {
+			details.put("residualPaidCorrectionCredit", residualPaidCreditAmount);
 		}
 		details.put("propertyId", propertyId);
 
@@ -560,6 +572,8 @@ public class DJBMonthlyDemandService {
 		private BigDecimal grossAmount;
 		private BigDecimal rebateAmount;
 		private BigDecimal netAmount;
+		private BigDecimal appliedPaidAdjustmentAmount;
+		private BigDecimal residualPaidCreditAmount;
 		private String message;
 	}
 }

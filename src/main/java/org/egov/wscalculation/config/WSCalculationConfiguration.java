@@ -50,7 +50,7 @@ public class WSCalculationConfiguration {
 
     @Value("${egov.bill.cancel.endpoint}")
     private String billCancelEndPoint;
-
+    
     @Value("${egov.demand.billexpirytime}")
     private Long demandBillExpiryTime;
 

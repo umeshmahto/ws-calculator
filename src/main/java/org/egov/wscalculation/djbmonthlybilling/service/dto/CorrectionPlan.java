@@ -26,6 +26,14 @@ public class CorrectionPlan {
     @Builder.Default
     private BigDecimal paidAdjustmentAmount = BigDecimal.ZERO;
 
+    /** Portion of paid adjustment applied to the corrected bill. */
+    @Builder.Default
+    private BigDecimal appliedPaidAdjustmentAmount = BigDecimal.ZERO;
+
+    /** Portion of paid adjustment left as customer credit after the corrected bill is fully settled. */
+    @Builder.Default
+    private BigDecimal residualPaidCreditAmount = BigDecimal.ZERO;
+
     private List<WaterBillingCycle> cyclesToCorrect;
 
     private boolean correctionRequired;

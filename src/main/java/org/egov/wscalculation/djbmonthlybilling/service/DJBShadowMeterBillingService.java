@@ -199,6 +199,28 @@ public class DJBShadowMeterBillingService {
 
 		if (demandResult.isDemandCreated()) {
 
+			if (correction != null && correction.getPlan() != null
+					&& demandResult.getAppliedPaidAdjustmentAmount() != null
+					&& demandResult.getResidualPaidCreditAmount() != null) {
+				/*
+				 * On the first creation these values are calculated from the current
+				 * corrected bill base. On an idempotent retry, createDemand() may return
+				 * an existing demand without recalculating them; in that case preserve
+				 * the amounts already persisted on the correction record.
+				 */
+				correction.getPlan().setAppliedPaidAdjustmentAmount(
+						demandResult.getAppliedPaidAdjustmentAmount());
+				correction.getPlan().setResidualPaidCreditAmount(
+						demandResult.getResidualPaidCreditAmount());
+				correction.getCorrection().setAppliedpaidadjustmentamount(
+						demandResult.getAppliedPaidAdjustmentAmount());
+				correction.getCorrection().setResidualpaidcreditamount(
+						demandResult.getResidualPaidCreditAmount());
+				correction.getCorrection().setLastmodifiedby(actor(requestInfo));
+				correction.getCorrection().setLastmodifiedtime(System.currentTimeMillis());
+				correctionService.updateCorrectionAmounts(tenantId, correction.getCorrection());
+			}
+
 			if (demandResult.getDemand() != null && StringUtils.hasText(demandResult.getDemand().getId())) {
 				cycle.setDemandid(demandResult.getDemand().getId());
 			}

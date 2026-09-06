@@ -129,7 +129,9 @@ public class CorrectionService {
 				if (plan.getCurrentOkBillingCycleId().equals(correction.getTobillingcycleid())
 						&& !CorrectionStatus.FAILED.equals(correction.getStatus())) {
 					if (!CorrectionStatus.COMPLETED.equals(correction.getStatus())) {
-						correction.setPaidadjustmentamount(plan.getPaidAdjustmentAmount());
+						correction.setPaidadjustmentamount(normalizeMoney(plan.getPaidAdjustmentAmount()));
+						plan.setAppliedPaidAdjustmentAmount(normalizeMoney(correction.getAppliedpaidadjustmentamount()));
+						plan.setResidualPaidCreditAmount(normalizeMoney(correction.getResidualpaidcreditamount()));
 						correction.setLastmodifiedby(actor);
 						correction.setLastmodifiedtime(currentTime);
 						billingCorrectionDao.update(correction);
@@ -150,6 +152,8 @@ public class CorrectionService {
 		correction.setStatus(CorrectionStatus.PENDING);
 		correction.setReason(plan.getReason());
 		correction.setPaidadjustmentamount(normalizeMoney(plan.getPaidAdjustmentAmount()));
+		correction.setAppliedpaidadjustmentamount(normalizeMoney(plan.getAppliedPaidAdjustmentAmount()));
+		correction.setResidualpaidcreditamount(normalizeMoney(plan.getResidualPaidCreditAmount()));
 		correction.setCreatedby(actor);
 		correction.setCreatedtime(currentTime);
 		correction.setLastmodifiedby(actor);
@@ -158,6 +162,15 @@ public class CorrectionService {
 		billingCorrectionDao.save(correction);
 
 		return correction;
+	}
+
+	@Transactional
+	public void updateCorrectionAmounts(String tenantId, BillingCorrection correction) {
+		if (correction == null || !StringUtils.hasText(correction.getId())) {
+			throw new IllegalArgumentException("Correction record is required to update paid adjustment amounts");
+		}
+		correction.setTenantid(tenantId);
+		billingCorrectionDao.update(correction);
 	}
 
 	/**
@@ -378,6 +391,10 @@ public class CorrectionService {
 
 		correctionToUpdate.setStatus(CorrectionStatus.COMPLETED);
 		correctionToUpdate.setPaidadjustmentamount(normalizeMoney(plan.getPaidAdjustmentAmount()));
+		correctionToUpdate.setAppliedpaidadjustmentamount(
+				normalizeMoney(plan.getAppliedPaidAdjustmentAmount()));
+		correctionToUpdate.setResidualpaidcreditamount(
+				normalizeMoney(plan.getResidualPaidCreditAmount()));
 		correctionToUpdate.setOlddemandid(joinUnique(oldDemandIds));
 		correctionToUpdate.setOldbillid(joinUnique(oldBillIds));
 		correctionToUpdate.setCorrecteddemandid(correctedDemandId);
@@ -454,6 +471,13 @@ public class CorrectionService {
 				calculatePaidAdjustmentAmount(requestInfo, tenantId, plan));
 
 		BillingCorrection correction = createPendingCorrection(tenantId, plan, actor, currentTime);
+
+		if (correction != null) {
+			plan.setAppliedPaidAdjustmentAmount(
+				normalizeMoney(correction.getAppliedpaidadjustmentamount()));
+			plan.setResidualPaidCreditAmount(
+				normalizeMoney(correction.getResidualpaidcreditamount()));
+		}
 
 		/*
 		 * If the correction was already completed earlier, do not report it as a new
