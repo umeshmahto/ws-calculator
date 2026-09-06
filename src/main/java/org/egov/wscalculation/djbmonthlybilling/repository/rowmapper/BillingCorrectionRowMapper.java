@@ -20,6 +20,7 @@ public class BillingCorrectionRowMapper implements RowMapper<BillingCorrection> 
         c.setTobillingcycleid(rs.getString("tobillingcycleid"));
         c.setStatus(CorrectionStatus.fromValue(rs.getString("status")));
         c.setReason(rs.getString("reason"));
+        c.setPaidadjustmentamount(rs.getBigDecimal("paidadjustmentamount"));
         c.setOlddemandid(rs.getString("olddemandid"));
         c.setOldbillid(rs.getString("oldbillid"));
         c.setCorrecteddemandid(rs.getString("correcteddemandid"));

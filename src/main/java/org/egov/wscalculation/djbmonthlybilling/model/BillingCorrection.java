@@ -1,5 +1,7 @@
 package org.egov.wscalculation.djbmonthlybilling.model;
 
+import java.math.BigDecimal;
+
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import lombok.Data;
 import org.egov.wscalculation.djbmonthlybilling.model.enums.CorrectionStatus;
@@ -14,6 +16,7 @@ public class BillingCorrection {
     private String tobillingcycleid;
     private CorrectionStatus status;
     private String reason;
+    private BigDecimal paidadjustmentamount;
     private String olddemandid;
     private String oldbillid;
     private String correcteddemandid;

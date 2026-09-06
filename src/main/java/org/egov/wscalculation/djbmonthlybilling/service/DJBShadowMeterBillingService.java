@@ -176,7 +176,7 @@ public class DJBShadowMeterBillingService {
 		CorrectionPlanResult correction = null;
 
 		if (BillingBasis.ACTUAL.equals(cycle.getBillingbasis())) {
-			correction = correctionService.processAutomaticCorrection(tenantId, cycle, actor(requestInfo),
+			correction = correctionService.processAutomaticCorrection(requestInfo, tenantId, cycle, actor(requestInfo),
 					System.currentTimeMillis());
 
 			if (correction != null && correction.isCorrectionRequired()) {
@@ -189,7 +189,13 @@ public class DJBShadowMeterBillingService {
 		 * Generate the generic UPYOG demand from the DJB-calculated amounts.
 		 * billing-service itself remains generic.
 		 */
-		DJBMonthlyDemandService.DemandResult demandResult = demandService.createDemand(requestInfo, cycle);
+		BigDecimal paidAdjustmentAmount = BigDecimal.ZERO;
+		if (correction != null && correction.getPlan() != null) {
+			paidAdjustmentAmount = correction.getPlan().getPaidAdjustmentAmount();
+		}
+
+		DJBMonthlyDemandService.DemandResult demandResult =
+				demandService.createDemand(requestInfo, cycle, paidAdjustmentAmount);
 
 		if (demandResult.isDemandCreated()) {
 

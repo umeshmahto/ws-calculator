@@ -22,6 +22,10 @@ public class CorrectionPlan {
 
     private BigDecimal correctedConsumption;
 
+    /** Total amount already collected against superseded average/provisional demands. */
+    @Builder.Default
+    private BigDecimal paidAdjustmentAmount = BigDecimal.ZERO;
+
     private List<WaterBillingCycle> cyclesToCorrect;
 
     private boolean correctionRequired;

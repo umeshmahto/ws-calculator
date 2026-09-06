@@ -1,6 +1,7 @@
 package org.egov.wscalculation.djbmonthlybilling.service;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -19,18 +20,22 @@ import org.egov.wscalculation.service.DemandService;
 import org.egov.wscalculation.web.models.Demand;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
+
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Builds the DJB automatic-correction plan when an OK reading is received after
  * estimated billing cycles.
  *
- * This service coordinates DJB correction state and deactivates superseded demands.
+ * This service coordinates DJB correction state, captures any paid amount from
+ * superseded average/provisional demands, and deactivates the superseded demand set.
  * The generic billing-service demand-create flow already moves the previous active
  * bill to historical state when the corrected demand is created, so DJB correction
- * does not call the generic bill-cancellation API. Paid-demand settlement remains
- * a separate flow.
+ * does not call the generic bill-cancellation API.
  */
 @Service
+@Slf4j
 public class CorrectionService {
 
 	private final WaterBillingCycleDao billingCycleDao;
@@ -123,6 +128,12 @@ public class CorrectionService {
 			for (BillingCorrection correction : history) {
 				if (plan.getCurrentOkBillingCycleId().equals(correction.getTobillingcycleid())
 						&& !CorrectionStatus.FAILED.equals(correction.getStatus())) {
+					if (!CorrectionStatus.COMPLETED.equals(correction.getStatus())) {
+						correction.setPaidadjustmentamount(plan.getPaidAdjustmentAmount());
+						correction.setLastmodifiedby(actor);
+						correction.setLastmodifiedtime(currentTime);
+						billingCorrectionDao.update(correction);
+					}
 					return correction;
 				}
 			}
@@ -138,6 +149,7 @@ public class CorrectionService {
 		correction.setTobillingcycleid(plan.getCurrentOkBillingCycleId());
 		correction.setStatus(CorrectionStatus.PENDING);
 		correction.setReason(plan.getReason());
+		correction.setPaidadjustmentamount(normalizeMoney(plan.getPaidAdjustmentAmount()));
 		correction.setCreatedby(actor);
 		correction.setCreatedtime(currentTime);
 		correction.setLastmodifiedby(actor);
@@ -149,17 +161,17 @@ public class CorrectionService {
 	}
 
 	/**
-	 * Deactivates all demands that are superseded by an automatic OK-to-OK
+	 * Deactivates the demands that are superseded by an automatic OK-to-OK
 	 * correction before the corrected bill is fetched.
 	 *
-	 * The previous OK demand is included because the final corrected demand spans
-	 * from the previous OK reading to the current OK reading. Leaving that demand
-	 * ACTIVE causes the generic billing-service _fetchbill endpoint to include the
-	 * old demand along with the corrected demand in the same bill.
+	 * The previous OK demand is still deactivated so that its original assessment
+	 * is not billed again with the consolidated OK-to-OK demand. Its payment,
+	 * however, is NOT treated as a correction credit because that payment belongs
+	 * to the valid previous-OK assessment.
 	 *
-	 * Paid/partially-paid demands are deliberately not cancelled here. Until the
-	 * DJB paid-demand settlement flow is implemented, failing fast is safer than
-	 * generating a financially incorrect consolidated bill.
+	 * For intervening average/provisional demands, any already-collected amount is
+	 * captured in CorrectionPlan.paidAdjustmentAmount and is represented as a
+	 * negative adjustment on the new corrected demand.
 	 */
 	public void deactivateSupersededDemands(RequestInfo requestInfo, String tenantId, CorrectionPlan plan) {
 
@@ -178,61 +190,54 @@ public class CorrectionService {
 		}
 
 		List<Demand> demandsToCancel = new ArrayList<>();
+		BigDecimal observedPaidAdjustment = BigDecimal.ZERO;
 
 		/*
-		 * Validate the full correction set before changing remote state. A paid or
-		 * partially-paid demand cannot be silently cancelled because DJB requires the
-		 * amount to be settled against the corrected bill.
+		 * Validate and collect the exact payment state again immediately before
+		 * cancellation. The corrected demand was already created using the preflight
+		 * amount stored in the plan; if the payment state changed in between, stop
+		 * rather than producing a mismatched financial adjustment.
 		 */
 		for (WaterBillingCycle cycle : supersededCycles) {
-			if (cycle == null) {
+			if (cycle == null || !StringUtils.hasText(cycle.getDemandid())) {
 				continue;
 			}
 
-
-			if (cycle.getDemandid() == null || cycle.getDemandid().trim().isEmpty()) {
-				continue;
-			}
-
-			List<Demand> demands = demandService.searchDemand(tenantId, Collections.singleton(plan.getConnectionNo()),
-					cycle.getBillingperiodfrom(), cycle.getBillingperiodto(), requestInfo, null, false, false);
-
-			Demand target = null;
-			if (demands != null) {
-				for (Demand demand : demands) {
-					if (demand != null && cycle.getDemandid().equals(demand.getId())) {
-						target = demand;
-						break;
-					}
-				}
-			}
+			Demand target = findDemandForCycle(requestInfo, tenantId, plan.getConnectionNo(), cycle);
 
 			if (target == null) {
 				throw new IllegalStateException("Superseded demand not found for billing cycle " + cycle.getId()
 						+ ", demand " + cycle.getDemandid());
 			}
 
+			BigDecimal collected = calculateCollectedAmount(target);
+
+			// Only intervening estimated cycles contribute a correction credit.
+			if (isEligibleCorrectionCycle(cycle)) {
+				observedPaidAdjustment = observedPaidAdjustment.add(collected);
+			}
+
 			if (Demand.StatusEnum.CANCELLED.equals(target.getStatus())) {
 				continue;
 			}
 
-			BigDecimal collected = BigDecimal.ZERO;
-			if (target.getDemandDetails() != null) {
-				for (org.egov.wscalculation.web.models.DemandDetail detail : target.getDemandDetails()) {
-					if (detail != null && detail.getCollectionAmount() != null) {
-						collected = collected.add(detail.getCollectionAmount());
-					}
-				}
-			}
-
-			if (collected.signum() > 0) {
-				throw new IllegalStateException(
-						"Automatic correction requires paid-demand settlement before cancelling demand "
-						+ target.getId());
+			// A paid previous-OK assessment is valid history, not a correction credit.
+			if (collected.signum() > 0 && !isPreviousOkCycle(cycle, plan)) {
+				// The amount is already captured in the plan; cancellation is safe because
+				// the corrected demand carries the matching negative adjustment.
+				logPaymentAdjustment(cycle, target, collected);
 			}
 
 			target.setStatus(Demand.StatusEnum.CANCELLED);
 			demandsToCancel.add(target);
+		}
+
+		BigDecimal expectedPaidAdjustment = normalizeMoney(plan.getPaidAdjustmentAmount());
+		if (observedPaidAdjustment.compareTo(expectedPaidAdjustment) != 0) {
+			throw new IllegalStateException(
+					"Paid DJB correction amount changed during correction for " + plan.getConnectionNo()
+							+ ". Expected " + expectedPaidAdjustment + " but found "
+							+ observedPaidAdjustment);
 		}
 
 		if (!demandsToCancel.isEmpty()) {
@@ -243,6 +248,55 @@ public class CorrectionService {
 						+ plan.getConnectionNo());
 			}
 		}
+	}
+
+	private Demand findDemandForCycle(RequestInfo requestInfo, String tenantId, String connectionNo,
+			WaterBillingCycle cycle) {
+		List<Demand> demands = demandService.searchDemand(tenantId, Collections.singleton(connectionNo),
+				cycle.getBillingperiodfrom(), cycle.getBillingperiodto(), requestInfo, null, false, false);
+
+		if (demands != null) {
+			for (Demand demand : demands) {
+				if (demand != null && cycle.getDemandid().equals(demand.getId())) {
+					return demand;
+				}
+			}
+		}
+		return null;
+	}
+
+	private BigDecimal calculateCollectedAmount(Demand demand) {
+		BigDecimal collected = BigDecimal.ZERO;
+		if (demand != null && demand.getDemandDetails() != null) {
+			for (org.egov.wscalculation.web.models.DemandDetail detail : demand.getDemandDetails()) {
+				if (detail != null && detail.getCollectionAmount() != null
+						&& detail.getCollectionAmount().signum() > 0) {
+					collected = collected.add(detail.getCollectionAmount());
+				}
+			}
+		}
+		return normalizeMoney(collected);
+	}
+
+	private boolean isEligibleCorrectionCycle(WaterBillingCycle cycle) {
+		return cycle != null
+				&& (BillingBasis.AVERAGE.equals(cycle.getBillingbasis())
+						|| BillingBasis.PROVISIONAL.equals(cycle.getBillingbasis()));
+	}
+
+	private boolean isPreviousOkCycle(WaterBillingCycle cycle, CorrectionPlan plan) {
+		return cycle != null && plan != null
+				&& plan.getPreviousOkBillingCycleId() != null
+				&& plan.getPreviousOkBillingCycleId().equals(cycle.getId());
+	}
+
+	private void logPaymentAdjustment(WaterBillingCycle cycle, Demand target, BigDecimal collected) {
+		log.info("[DJB-CORRECTION] Paid adjustment captured: cycleId={}, demandId={}, amount={}",
+				cycle.getId(), target.getId(), collected);
+	}
+
+	private BigDecimal normalizeMoney(BigDecimal amount) {
+		return (amount == null ? BigDecimal.ZERO : amount).setScale(2, RoundingMode.HALF_UP);
 	}
 
 	/**
@@ -323,6 +377,7 @@ public class CorrectionService {
 		}
 
 		correctionToUpdate.setStatus(CorrectionStatus.COMPLETED);
+		correctionToUpdate.setPaidadjustmentamount(normalizeMoney(plan.getPaidAdjustmentAmount()));
 		correctionToUpdate.setOlddemandid(joinUnique(oldDemandIds));
 		correctionToUpdate.setOldbillid(joinUnique(oldBillIds));
 		correctionToUpdate.setCorrecteddemandid(correctedDemandId);
@@ -342,6 +397,35 @@ public class CorrectionService {
 		return String.join(",", unique);
 	}
 
+	/**
+	 * Calculates the total amount already received against the intervening
+	 * average/provisional demands. The previous OK demand is intentionally
+	 * excluded because its payment is for a valid historical assessment.
+	 */
+	private BigDecimal calculatePaidAdjustmentAmount(RequestInfo requestInfo, String tenantId, CorrectionPlan plan) {
+		BigDecimal total = BigDecimal.ZERO;
+		if (plan == null || plan.getCyclesToCorrect() == null) {
+			return total.setScale(2, RoundingMode.HALF_UP);
+		}
+
+		for (WaterBillingCycle cycle : plan.getCyclesToCorrect()) {
+			if (cycle == null || !StringUtils.hasText(cycle.getDemandid())) {
+				throw new IllegalStateException(
+						"Eligible DJB correction cycle has no demand id: " + (cycle == null ? null : cycle.getId()));
+			}
+
+			Demand demand = findDemandForCycle(requestInfo, tenantId, plan.getConnectionNo(), cycle);
+			if (demand == null) {
+				throw new IllegalStateException(
+						"Unable to find demand for eligible DJB correction cycle " + cycle.getId());
+			}
+
+			total = total.add(calculateCollectedAmount(demand));
+		}
+
+		return normalizeMoney(total);
+	}
+
 	private void validateCurrentOkCycle(WaterBillingCycle currentOkCycle) {
 
 		if (currentOkCycle == null) {
@@ -357,14 +441,17 @@ public class CorrectionService {
 	 * Runs only automatic correction detection and creates the pending correction
 	 * record. It does not cancel bills.
 	 */
-	public CorrectionPlanResult processAutomaticCorrection(String tenantId, WaterBillingCycle currentOkCycle,
-			String actor, long currentTime) {
+	public CorrectionPlanResult processAutomaticCorrection(RequestInfo requestInfo, String tenantId,
+			WaterBillingCycle currentOkCycle, String actor, long currentTime) {
 
 		CorrectionPlan plan = buildCorrectionPlan(tenantId, currentOkCycle);
 
 		if (plan == null || !plan.isCorrectionRequired()) {
 			return CorrectionPlanResult.builder().correctionRequired(false).build();
 		}
+
+		plan.setPaidAdjustmentAmount(
+				calculatePaidAdjustmentAmount(requestInfo, tenantId, plan));
 
 		BillingCorrection correction = createPendingCorrection(tenantId, plan, actor, currentTime);
 

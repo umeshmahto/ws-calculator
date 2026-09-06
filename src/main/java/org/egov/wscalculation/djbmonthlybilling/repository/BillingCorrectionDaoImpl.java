@@ -16,13 +16,14 @@ public class BillingCorrectionDaoImpl implements BillingCorrectionDao {
     @Override public int save(BillingCorrection c) {
         return jdbcTemplate.update(queryBuilder.insertCorrection(), c.getId(), c.getTenantid(), c.getConnectionno(),
                 c.getFrombillingcycleid(), c.getTobillingcycleid(), value(c.getStatus()), c.getReason(),
-                c.getOlddemandid(), c.getOldbillid(), c.getCorrecteddemandid(), c.getCorrectedbillid(),
+                c.getPaidadjustmentamount(), c.getOlddemandid(), c.getOldbillid(), c.getCorrecteddemandid(), c.getCorrectedbillid(),
                 c.getCreatedby(), c.getCreatedtime(), c.getLastmodifiedby(), c.getLastmodifiedtime());
     }
     @Override public int update(BillingCorrection c) {
         return jdbcTemplate.update(queryBuilder.updateCorrection(), c.getConnectionno(), c.getFrombillingcycleid(),
-                c.getTobillingcycleid(), value(c.getStatus()), c.getReason(), c.getOlddemandid(), c.getOldbillid(),
-                c.getCorrecteddemandid(), c.getCorrectedbillid(), c.getLastmodifiedby(), c.getLastmodifiedtime(),
+                c.getTobillingcycleid(), value(c.getStatus()), c.getReason(), c.getPaidadjustmentamount(),
+                c.getOlddemandid(), c.getOldbillid(), c.getCorrecteddemandid(), c.getCorrectedbillid(),
+                c.getLastmodifiedby(), c.getLastmodifiedtime(),
                 c.getTenantid(), c.getId());
     }
     @Override public BillingCorrection findById(String t, String id) {

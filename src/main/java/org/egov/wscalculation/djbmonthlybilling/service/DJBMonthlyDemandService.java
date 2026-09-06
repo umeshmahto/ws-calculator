@@ -91,8 +91,21 @@ public class DJBMonthlyDemandService {
 	 * remains completely generic.
 	 */
 	public DemandResult createDemand(RequestInfo requestInfo, WaterBillingCycle cycle) {
+		return createDemand(requestInfo, cycle, BigDecimal.ZERO);
+	}
+
+	/**
+	 * Creates a DJB demand and, for an automatic correction, applies the total
+	 * amount already collected against superseded average/provisional demands as
+	 * a negative adjustment.
+	 */
+	public DemandResult createDemand(RequestInfo requestInfo, WaterBillingCycle cycle,
+			BigDecimal paidAdjustmentAmount) {
 
 		validateCycle(cycle);
+		BigDecimal paidAdjustment = paidAdjustmentAmount == null
+				? BigDecimal.ZERO
+				: paidAdjustmentAmount.setScale(MONEY_SCALE, RoundingMode.HALF_UP);
 
 		// Idempotency: the same billing cycle must never create a second demand.
 		if (org.springframework.util.StringUtils.hasText(cycle.getDemandid())) {
@@ -156,22 +169,30 @@ public class DJBMonthlyDemandService {
 
 		RebateCalculationResult rebate = rebateCalculationService.calculate(rebateContext, rebates);
 
-		BigDecimal netAmount = grossAmount.subtract(rebate.getTotalRebate()).setScale(MONEY_SCALE,
+		BigDecimal baseNetAmount = grossAmount.subtract(rebate.getTotalRebate()).setScale(MONEY_SCALE,
 				RoundingMode.HALF_UP);
 
+		BigDecimal netAmount = baseNetAmount.subtract(paidAdjustment).setScale(MONEY_SCALE,
+				RoundingMode.HALF_UP);
+
+		if (baseNetAmount.signum() < 0) {
+			throw new IllegalStateException("DJB net demand amount cannot be negative: " + baseNetAmount);
+		}
+
 		if (netAmount.signum() < 0) {
-			throw new IllegalStateException("DJB net demand amount cannot be negative: " + netAmount);
+			throw new IllegalStateException(
+					"Paid DJB correction adjustment exceeds corrected bill amount for " + cycle.getConnectionno()
+							+ ". Required credit/refund workflow is not supported by this bill path: " + paidAdjustment);
 		}
 
 		List<DemandDetail> demandDetails = new java.util.ArrayList<>();
 
 		/*
-		 * Current generic WS tax-head contract contains WS_CHARGE and WS_TIME_REBATE.
-		 * We keep the complete gross water + sewer amount in WS_CHARGE, and represent
-		 * DJB rebates as a negative WS_TIME_REBATE.
-		 *
-		 * We do not invent a DJB-specific tax head because billing-service owns generic
-		 * tax-head masters.
+		 * Generic WS tax-head contract:
+		 *   - WS_CHARGE for gross water + sewer charge
+		 *   - WS_TIME_REBATE for normal DJB rebate
+		 *   - WS_TIME_ADHOC_REBATE for a paid DJB correction adjustment
+		 *     (an existing generic WS tax head; no DJB-specific tax head is introduced)
 		 */
 		if (grossAmount.signum() > 0) {
 			demandDetails.add(DemandDetail.builder().taxHeadMasterCode(WSCalculationConstant.WS_CHARGE)
@@ -181,6 +202,18 @@ public class DJBMonthlyDemandService {
 		if (rebate.getTotalRebate().signum() > 0) {
 			demandDetails.add(DemandDetail.builder().taxHeadMasterCode(WSCalculationConstant.WS_TIME_REBATE)
 					.taxAmount(rebate.getTotalRebate().negate().setScale(MONEY_SCALE, RoundingMode.HALF_UP))
+					.collectionAmount(BigDecimal.ZERO).tenantId(tenantId).build());
+		}
+
+		if (paidAdjustment.signum() > 0) {
+			/*
+			 * Use the existing generic WS adhoc-rebate tax head rather than inventing a
+			 * DJB-specific financial head. This keeps billing-service generic while making
+			 * the prior paid amount a real negative bill detail.
+			 */
+			demandDetails.add(DemandDetail.builder()
+					.taxHeadMasterCode(WSCalculationConstant.WS_TIME_ADHOC_REBATE)
+					.taxAmount(paidAdjustment.negate().setScale(MONEY_SCALE, RoundingMode.HALF_UP))
 					.collectionAmount(BigDecimal.ZERO).tenantId(tenantId).build());
 		}
 
@@ -206,7 +239,7 @@ public class DJBMonthlyDemandService {
 				.billExpiryTime(config.getDemandBillExpiryTime() == null ? null
 						: System.currentTimeMillis() + config.getDemandBillExpiryTime())
 				.status(Demand.StatusEnum.ACTIVE).additionalDetails(buildAdditionalDetails(cycle, category, grossAmount,
-						rebate.getTotalRebate(), netAmount, property.getPropertyId()))
+						rebate.getTotalRebate(), netAmount, paidAdjustment, property.getPropertyId()))
 				.build();
 
 		DemandNotificationObj notification = DemandNotificationObj.builder().requestInfo(requestInfo).tenantId(tenantId)
@@ -354,14 +387,13 @@ public class DJBMonthlyDemandService {
 		return null;
 	}
 
-
 	/**
 	 * Fetches a bill for a demand that has already been created.
 	 *
 	 * This is used by the DJB automatic-correction flow after the final
-	 * corrected-actual demand already exists. It deliberately reuses the
-	 * existing generic UPYOG billing-service /_fetchbill contract and does
-	 * not create another Demand.
+	 * corrected-actual demand already exists. It deliberately reuses the existing
+	 * generic UPYOG billing-service /_fetchbill contract and does not create
+	 * another Demand.
 	 */
 	public String fetchBillForExistingDemand(RequestInfo requestInfo, Demand demand) {
 
@@ -377,28 +409,22 @@ public class DJBMonthlyDemandService {
 	/**
 	 * Fetches the bill for an already-created DJB demand when the Demand object
 	 * itself is not available (for example, an idempotent retry after demand
-	 * creation). The generic _fetchbill endpoint searches by tenant, consumer
-	 * and WS business service, so no second Demand is created here.
+	 * creation). The generic _fetchbill endpoint searches by tenant, consumer and
+	 * WS business service, so no second Demand is created here.
 	 */
-	public String fetchBillForExistingDemand(
-			RequestInfo requestInfo,
-			String tenantId,
-			String connectionNo) {
+	public String fetchBillForExistingDemand(RequestInfo requestInfo, String tenantId, String connectionNo) {
 
 		if (!StringUtils.hasText(tenantId) || !StringUtils.hasText(connectionNo)) {
-			throw new IllegalArgumentException(
-					"TenantId and connectionNo are required to fetch an existing DJB bill");
+			throw new IllegalArgumentException("TenantId and connectionNo are required to fetch an existing DJB bill");
 		}
 
 		StringBuilder url = calculatorUtil.getFetchBillURL(tenantId, connectionNo);
 
-		Object result = serviceRequestRepository.fetchResult(
-				url,
+		Object result = serviceRequestRepository.fetchResult(url,
 				RequestInfoWrapper.builder().requestInfo(requestInfo).build());
 
 		if (result == null) {
-			throw new IllegalStateException(
-					"Billing-service returned null bill response for " + connectionNo);
+			throw new IllegalStateException("Billing-service returned null bill response for " + connectionNo);
 		}
 
 		Map<String, Object> billResponse = new HashMap<>();
@@ -488,7 +514,7 @@ public class DJBMonthlyDemandService {
 	}
 
 	private Map<String, Object> buildAdditionalDetails(WaterBillingCycle cycle, String category, BigDecimal grossAmount,
-			BigDecimal rebateAmount, BigDecimal netAmount, String propertyId) {
+			BigDecimal rebateAmount, BigDecimal netAmount, BigDecimal paidAdjustmentAmount, String propertyId) {
 
 		Map<String, Object> details = new HashMap<>();
 		details.put("djbBillingCycleId", cycle.getId());
@@ -500,6 +526,10 @@ public class DJBMonthlyDemandService {
 		details.put("grossAmount", grossAmount);
 		details.put("rebateAmount", rebateAmount);
 		details.put("netAmount", netAmount);
+		if (paidAdjustmentAmount != null && paidAdjustmentAmount.signum() > 0) {
+			details.put("paidCorrectionAdjustment", paidAdjustmentAmount);
+			details.put("correctionAdjustmentTaxHead", WSCalculationConstant.WS_TIME_ADHOC_REBATE);
+		}
 		details.put("propertyId", propertyId);
 
 		return details;
