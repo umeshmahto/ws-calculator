@@ -118,6 +118,71 @@ public class DJBMonthlyBillingQueryBuilder {
                 "WHERE tenantid = ? AND id = ?";
     }
 
+    public String findOpenResidualCreditsForUpdate() {
+        return "SELECT * FROM eg_ws_billingcredit " +
+               "WHERE tenantid = ? AND connectionno = ? AND status = 'OPEN' " +
+               "AND remainingamount > reservedamount " +
+               "ORDER BY createdtime ASC, id ASC FOR UPDATE";
+    }
+
+    public String findResidualCreditByIdForUpdate() {
+        return "SELECT * FROM eg_ws_billingcredit WHERE tenantid = ? AND id = ? FOR UPDATE";
+    }
+
+    public String findResidualCreditBySourceCorrection() {
+        return "SELECT * FROM eg_ws_billingcredit WHERE tenantid = ? AND sourcecorrectionid = ?";
+    }
+
+    public String findResidualCreditAllocationsByBillingCycle() {
+        return "SELECT * FROM eg_ws_billingcreditallocation " +
+               "WHERE tenantid = ? AND billingcycleid = ? ORDER BY createdtime ASC, id ASC";
+    }
+
+    public String insertResidualCredit() {
+        return "INSERT INTO eg_ws_billingcredit (" +
+               "id, tenantid, connectionno, sourcecorrectionid, originalamount, remainingamount, reservedamount, " +
+               "status, createdby, createdtime, lastmodifiedby, lastmodifiedtime) " +
+               "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    }
+
+    public String updateResidualCredit() {
+        return "UPDATE eg_ws_billingcredit SET connectionno = ?, sourcecorrectionid = ?, originalamount = ?, " +
+               "remainingamount = ?, reservedamount = ?, status = ?, lastmodifiedby = ?, lastmodifiedtime = ? " +
+               "WHERE tenantid = ? AND id = ?";
+    }
+
+    public String insertResidualCreditAllocation() {
+        return "INSERT INTO eg_ws_billingcreditallocation (" +
+               "id, tenantid, creditid, billingcycleid, demandid, billid, appliedamount, status, createdby, createdtime, " +
+               "lastmodifiedby, lastmodifiedtime) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    }
+
+    public String updateResidualCreditAllocation() {
+        return "UPDATE eg_ws_billingcreditallocation SET demandid = ?, billid = ?, appliedamount = ?, status = ?, " +
+               "lastmodifiedby = ?, lastmodifiedtime = ? WHERE tenantid = ? AND id = ?";
+    }
+
+    public String reserveResidualCredit() {
+        return "UPDATE eg_ws_billingcredit SET reservedamount = reservedamount + ?, " +
+               "lastmodifiedby = ?, lastmodifiedtime = ? " +
+               "WHERE tenantid = ? AND id = ? AND status = 'OPEN' " +
+               "AND remainingamount - reservedamount >= ?";
+    }
+
+    public String consumeReservedResidualCredit() {
+        return "UPDATE eg_ws_billingcredit SET reservedamount = reservedamount - ?, " +
+               "remainingamount = remainingamount - ?, " +
+               "status = CASE WHEN remainingamount - ? = 0 THEN 'EXHAUSTED' ELSE 'OPEN' END, " +
+               "lastmodifiedby = ?, lastmodifiedtime = ? " +
+               "WHERE tenantid = ? AND id = ? AND reservedamount >= ? AND remainingamount >= ?";
+    }
+
+    public String releaseReservedResidualCredit() {
+        return "UPDATE eg_ws_billingcredit SET reservedamount = reservedamount - ?, " +
+               "lastmodifiedby = ?, lastmodifiedtime = ? " +
+               "WHERE tenantid = ? AND id = ? AND reservedamount >= ?";
+    }
+
    public String findPreviousOkByConnectionBefore() {
         return "SELECT * FROM eg_ws_billingcycle " +
                "WHERE tenantid = ? AND connectionno = ? " +

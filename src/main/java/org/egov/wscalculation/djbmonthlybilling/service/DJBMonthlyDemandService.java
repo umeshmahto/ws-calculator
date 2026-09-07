@@ -25,6 +25,7 @@ import org.egov.wscalculation.djbmonthlybilling.service.dto.SewerageCalculationC
 import org.egov.wscalculation.djbmonthlybilling.service.dto.SewerageCalculationResult;
 import org.egov.wscalculation.djbmonthlybilling.service.dto.TariffCalculationResult;
 import org.egov.wscalculation.djbmonthlybilling.service.master.DJBMonthlyBillingMasterProvider;
+import org.egov.wscalculation.djbmonthlybilling.service.ResidualCreditService.CreditReservationResult;
 import org.egov.wscalculation.producer.WSCalculationProducer;
 import org.egov.wscalculation.repository.DemandRepository;
 import org.egov.wscalculation.repository.ServiceRequestRepository;
@@ -60,13 +61,14 @@ public class DJBMonthlyDemandService {
 	private final ServiceRequestRepository serviceRequestRepository;
 	private final ObjectMapper objectMapper;
 	private final WSCalculationProducer wsCalculationProducer;
+	private final ResidualCreditService residualCreditService;
 
 	public DJBMonthlyDemandService(DJBMonthlyBillingMasterProvider masterProvider,
 			TariffCalculationService tariffCalculationService, SewerageCalculationService sewerageCalculationService,
 			RebateCalculationService rebateCalculationService, DemandRepository demandRepository,
 			CalculatorUtil calculatorUtil, WSCalculationUtil wsCalculationUtil, WSCalculationConfiguration config,
 			ServiceRequestRepository serviceRequestRepository, ObjectMapper objectMapper,
-			WSCalculationProducer wsCalculationProducer) {
+			WSCalculationProducer wsCalculationProducer, ResidualCreditService residualCreditService) {
 
 		this.masterProvider = masterProvider;
 		this.tariffCalculationService = tariffCalculationService;
@@ -79,6 +81,7 @@ public class DJBMonthlyDemandService {
 		this.serviceRequestRepository = serviceRequestRepository;
 		this.objectMapper = objectMapper;
 		this.wsCalculationProducer = wsCalculationProducer;
+		this.residualCreditService = residualCreditService;
 	}
 
 	/**
@@ -109,6 +112,12 @@ public class DJBMonthlyDemandService {
 
 		// Idempotency: the same billing cycle must never create a second demand.
 		if (org.springframework.util.StringUtils.hasText(cycle.getDemandid())) {
+			// Recover a credit reservation that may have been left RESERVED after a prior
+			// attempt successfully created the Demand but failed before credit confirmation.
+			if (!CorrectionStatus.PENDING.equals(cycle.getCorrectionstatus())) {
+				residualCreditService.recoverPendingReservations(cycle.getTenantid(), cycle.getId(),
+						cycle.getDemandid(), "SYSTEM", System.currentTimeMillis());
+			}
 			return DemandResult.builder().demandCreated(true).zroRequired(false)
 					.message("DJB demand already exists for billing cycle").build();
 		}
@@ -187,8 +196,26 @@ public class DJBMonthlyDemandService {
 				.setScale(MONEY_SCALE, RoundingMode.HALF_UP);
 		BigDecimal residualPaidCredit = paidAdjustment.subtract(appliedPaidAdjustment)
 				.max(BigDecimal.ZERO).setScale(MONEY_SCALE, RoundingMode.HALF_UP);
-		BigDecimal netAmount = baseNetAmount.subtract(appliedPaidAdjustment).setScale(MONEY_SCALE,
-				RoundingMode.HALF_UP);
+
+		BigDecimal carryForwardCreditApplied = BigDecimal.ZERO.setScale(MONEY_SCALE);
+		CreditReservationResult creditReservation = CreditReservationResult.empty();
+
+		/*
+		 * A residual credit created by an earlier automatic correction is applied only
+		 * to a normal future monthly bill. It is deliberately not mixed into the
+		 * current correction transaction because the current correction may itself
+		 * create a new residual credit.
+		 */
+		if (!CorrectionStatus.PENDING.equals(cycle.getCorrectionstatus())) {
+			BigDecimal amountAvailableForCarryForward = baseNetAmount.subtract(appliedPaidAdjustment)
+					.max(BigDecimal.ZERO).setScale(MONEY_SCALE, RoundingMode.HALF_UP);
+			creditReservation = residualCreditService.reserveForBillingCycle(tenantId, connectionNo, cycle.getId(),
+					amountAvailableForCarryForward, actorForDemand(requestInfo), System.currentTimeMillis());
+			carryForwardCreditApplied = residualCreditService.getTotalAppliedAmount(creditReservation);
+		}
+
+		BigDecimal netAmount = baseNetAmount.subtract(appliedPaidAdjustment).subtract(carryForwardCreditApplied)
+				.setScale(MONEY_SCALE, RoundingMode.HALF_UP);
 
 		List<DemandDetail> demandDetails = new java.util.ArrayList<>();
 
@@ -222,6 +249,18 @@ public class DJBMonthlyDemandService {
 					.collectionAmount(BigDecimal.ZERO).tenantId(tenantId).build());
 		}
 
+		if (carryForwardCreditApplied.signum() > 0) {
+			/*
+			 * Carry-forward of an earlier correction credit uses the same existing generic
+			 * WS adhoc-rebate tax head. It is a real negative demand detail, so the
+			 * generic billing-service naturally includes it in the next bill.
+			 */
+			demandDetails.add(DemandDetail.builder()
+					.taxHeadMasterCode(WSCalculationConstant.WS_TIME_ADHOC_REBATE)
+					.taxAmount(carryForwardCreditApplied.negate().setScale(MONEY_SCALE, RoundingMode.HALF_UP))
+					.collectionAmount(BigDecimal.ZERO).tenantId(tenantId).build());
+		}
+
 		if (demandDetails.isEmpty()) {
 			throw new IllegalStateException("No positive DJB demand detail could be generated");
 		}
@@ -245,15 +284,23 @@ public class DJBMonthlyDemandService {
 						: System.currentTimeMillis() + config.getDemandBillExpiryTime())
 				.status(Demand.StatusEnum.ACTIVE).additionalDetails(buildAdditionalDetails(cycle, category, grossAmount,
 						rebate.getTotalRebate(), netAmount, appliedPaidAdjustment, residualPaidCredit,
-						property.getPropertyId()))
+						carryForwardCreditApplied, creditReservation.getAllocationIds(), property.getPropertyId()))
 				.build();
 
 		DemandNotificationObj notification = DemandNotificationObj.builder().requestInfo(requestInfo).tenantId(tenantId)
 				.waterConnectionIds(Collections.singleton(connectionNo))
 				.billingCycle(WSCalculationConstant.Monthly_Billing_Period).build();
 
-		List<Demand> response = demandRepository.saveDemand(requestInfo, Collections.singletonList(demand),
-				notification);
+		List<Demand> response;
+		try {
+			response = demandRepository.saveDemand(requestInfo, Collections.singletonList(demand), notification);
+		} catch (RuntimeException ex) {
+			if (creditReservation.isNewReservation()) {
+				residualCreditService.releaseReservations(tenantId, cycle.getId(), actorForDemand(requestInfo),
+						System.currentTimeMillis());
+			}
+			throw ex;
+		}
 
 		if (CollectionUtils.isEmpty(response) || response.get(0) == null
 				|| !StringUtils.hasText(response.get(0).getId())) {
@@ -261,6 +308,11 @@ public class DJBMonthlyDemandService {
 		}
 
 		Demand created = response.get(0);
+
+		if (creditReservation.isNewReservation()) {
+			residualCreditService.confirmReservations(tenantId, cycle.getId(), created.getId(),
+					actorForDemand(requestInfo), System.currentTimeMillis());
+		}
 
 		/*
 		 * Follow the same generic UPYOG pattern as the existing
@@ -271,12 +323,16 @@ public class DJBMonthlyDemandService {
 		String billId = null;
 		if (!CorrectionStatus.PENDING.equals(cycle.getCorrectionstatus())) {
 			billId = fetchAndGetBillId(requestInfo, created);
+			residualCreditService.attachBillId(tenantId, cycle.getId(), billId, actorForDemand(requestInfo),
+					System.currentTimeMillis());
 		}
 
 		return DemandResult.builder().demandCreated(true).zroRequired(false).demand(created).billId(billId)
 				.grossAmount(grossAmount).rebateAmount(rebate.getTotalRebate()).netAmount(netAmount)
 				.appliedPaidAdjustmentAmount(appliedPaidAdjustment)
 				.residualPaidCreditAmount(residualPaidCredit)
+				.carriedForwardCreditAppliedAmount(carryForwardCreditApplied)
+				.carriedForwardCreditAllocationIds(creditReservation.getAllocationIds())
 				.message(StringUtils.hasText(billId) ? "DJB demand and bill created successfully"
 						: "DJB demand created successfully")
 				.build();
@@ -523,7 +579,8 @@ public class DJBMonthlyDemandService {
 
 	private Map<String, Object> buildAdditionalDetails(WaterBillingCycle cycle, String category, BigDecimal grossAmount,
 			BigDecimal rebateAmount, BigDecimal netAmount, BigDecimal appliedPaidAdjustmentAmount,
-			BigDecimal residualPaidCreditAmount, String propertyId) {
+			BigDecimal residualPaidCreditAmount, BigDecimal carryForwardCreditApplied, List<String> creditAllocationIds,
+			String propertyId) {
 
 		Map<String, Object> details = new HashMap<>();
 		details.put("djbBillingCycleId", cycle.getId());
@@ -542,9 +599,23 @@ public class DJBMonthlyDemandService {
 		if (residualPaidCreditAmount != null && residualPaidCreditAmount.signum() > 0) {
 			details.put("residualPaidCorrectionCredit", residualPaidCreditAmount);
 		}
+		if (carryForwardCreditApplied != null && carryForwardCreditApplied.signum() > 0) {
+			details.put("carriedForwardResidualCredit", carryForwardCreditApplied);
+			if (!CollectionUtils.isEmpty(creditAllocationIds)) {
+				details.put("carriedForwardResidualCreditAllocationIds", creditAllocationIds);
+			}
+		}
 		details.put("propertyId", propertyId);
 
 		return details;
+	}
+
+	private String actorForDemand(RequestInfo requestInfo) {
+		if (requestInfo != null && requestInfo.getUserInfo() != null
+				&& StringUtils.hasText(requestInfo.getUserInfo().getUuid())) {
+			return requestInfo.getUserInfo().getUuid();
+		}
+		return "SYSTEM";
 	}
 
 	private void validateCycle(WaterBillingCycle cycle) {
@@ -574,6 +645,8 @@ public class DJBMonthlyDemandService {
 		private BigDecimal netAmount;
 		private BigDecimal appliedPaidAdjustmentAmount;
 		private BigDecimal residualPaidCreditAmount;
+		private BigDecimal carriedForwardCreditAppliedAmount;
+		private List<String> carriedForwardCreditAllocationIds;
 		private String message;
 	}
 }

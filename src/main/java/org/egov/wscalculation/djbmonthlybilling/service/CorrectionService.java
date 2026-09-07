@@ -42,13 +42,15 @@ public class CorrectionService {
 	private final BillingCorrectionDao billingCorrectionDao;
 	private final DemandRepository demandRepository;
 	private final DemandService demandService;
+	private final ResidualCreditService residualCreditService;
 
 	public CorrectionService(WaterBillingCycleDao billingCycleDao, BillingCorrectionDao billingCorrectionDao,
-			DemandRepository demandRepository, DemandService demandService) {
+			DemandRepository demandRepository, DemandService demandService, ResidualCreditService residualCreditService) {
 		this.billingCycleDao = billingCycleDao;
 		this.billingCorrectionDao = billingCorrectionDao;
 		this.demandRepository = demandRepository;
 		this.demandService = demandService;
+		this.residualCreditService = residualCreditService;
 	}
 
 	public CorrectionPlan buildCorrectionPlan(String tenantId, WaterBillingCycle currentOkCycle) {
@@ -403,6 +405,14 @@ public class CorrectionService {
 		correctionToUpdate.setLastmodifiedtime(currentTime);
 
 		billingCorrectionDao.update(correctionToUpdate);
+
+		/*
+		 * If the previous average/provisional bills were overpaid relative to the
+		 * corrected OK-to-OK liability, create a durable residual credit. The credit
+		 * is applied by ResidualCreditService to future DJB monthly demands; it is not
+		 * silently lost and no refund is assumed here.
+		 */
+		residualCreditService.createResidualCredit(correctionToUpdate, actor, currentTime);
 	}
 
 	private String joinUnique(List<String> values) {
