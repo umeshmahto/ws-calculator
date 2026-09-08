@@ -194,8 +194,8 @@ public class DJBShadowMeterBillingService {
 			paidAdjustmentAmount = correction.getPlan().getPaidAdjustmentAmount();
 		}
 
-		DJBMonthlyDemandService.DemandResult demandResult =
-				demandService.createDemand(requestInfo, cycle, paidAdjustmentAmount);
+		DJBMonthlyDemandService.DemandResult demandResult = demandService.createDemand(requestInfo, cycle,
+				paidAdjustmentAmount);
 
 		if (demandResult.isDemandCreated()) {
 
@@ -203,19 +203,16 @@ public class DJBShadowMeterBillingService {
 					&& demandResult.getAppliedPaidAdjustmentAmount() != null
 					&& demandResult.getResidualPaidCreditAmount() != null) {
 				/*
-				 * On the first creation these values are calculated from the current
-				 * corrected bill base. On an idempotent retry, createDemand() may return
-				 * an existing demand without recalculating them; in that case preserve
-				 * the amounts already persisted on the correction record.
+				 * On the first creation these values are calculated from the current corrected
+				 * bill base. On an idempotent retry, createDemand() may return an existing
+				 * demand without recalculating them; in that case preserve the amounts already
+				 * persisted on the correction record.
 				 */
-				correction.getPlan().setAppliedPaidAdjustmentAmount(
-						demandResult.getAppliedPaidAdjustmentAmount());
-				correction.getPlan().setResidualPaidCreditAmount(
-						demandResult.getResidualPaidCreditAmount());
-				correction.getCorrection().setAppliedpaidadjustmentamount(
-						demandResult.getAppliedPaidAdjustmentAmount());
-				correction.getCorrection().setResidualpaidcreditamount(
-						demandResult.getResidualPaidCreditAmount());
+				correction.getPlan().setAppliedPaidAdjustmentAmount(demandResult.getAppliedPaidAdjustmentAmount());
+				correction.getPlan().setResidualPaidCreditAmount(demandResult.getResidualPaidCreditAmount());
+				correction.getCorrection()
+						.setAppliedpaidadjustmentamount(demandResult.getAppliedPaidAdjustmentAmount());
+				correction.getCorrection().setResidualpaidcreditamount(demandResult.getResidualPaidCreditAmount());
 				correction.getCorrection().setLastmodifiedby(actor(requestInfo));
 				correction.getCorrection().setLastmodifiedtime(System.currentTimeMillis());
 				correctionService.updateCorrectionAmounts(tenantId, correction.getCorrection());
@@ -237,22 +234,21 @@ public class DJBShadowMeterBillingService {
 			if (CorrectionStatus.PENDING.equals(cycle.getCorrectionstatus())) {
 
 				/*
-				 * The corrected demand must be created first, but the final bill must only
-				 * see that demand as billable. Therefore cancel every superseded demand
-				 * before invoking the generic UPYOG _fetchbill endpoint.
+				 * The corrected demand must be created first, but the final bill must only see
+				 * that demand as billable. Therefore cancel every superseded demand before
+				 * invoking the generic UPYOG _fetchbill endpoint.
 				 *
-				 * This is intentionally kept in ws-calculator. billing-service remains
-				 * generic and is only asked to create/update demands and fetch the bill.
+				 * This is intentionally kept in ws-calculator. billing-service remains generic
+				 * and is only asked to create/update demands and fetch the bill.
 				 */
 				if (correction != null && correction.getPlan() != null) {
 					/*
 					 * The corrected demand was created through billing-service immediately above.
 					 * Its generic demand-create lifecycle already expires the previous active bill.
-					 * Therefore correction only needs to cancel superseded demands here; it must not
-					 * call /bill/v2/_cancelbill for the already-historical bill chain.
+					 * Therefore correction only needs to cancel superseded demands here; it must
+					 * not call /bill/v2/_cancelbill for the already-historical bill chain.
 					 */
-					correctionService.deactivateSupersededDemands(
-							requestInfo, tenantId, correction.getPlan());
+					correctionService.deactivateSupersededDemands(requestInfo, tenantId, correction.getPlan());
 				}
 
 				if (!StringUtils.hasText(cycle.getBillid())) {
