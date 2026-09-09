@@ -7,7 +7,6 @@ import org.egov.common.contract.request.RequestInfo;
 import org.egov.wscalculation.djbmonthlybilling.model.WaterBillingCycle;
 import org.egov.wscalculation.djbmonthlybilling.model.ZroVerification;
 import org.egov.wscalculation.djbmonthlybilling.model.enums.BillingCycleStatus;
-import org.egov.wscalculation.djbmonthlybilling.model.enums.CorrectionStatus;
 import org.egov.wscalculation.djbmonthlybilling.model.enums.ZroStatus;
 import org.egov.wscalculation.djbmonthlybilling.repository.WaterBillingCycleDao;
 import org.egov.wscalculation.djbmonthlybilling.repository.ZroVerificationDao;
@@ -19,153 +18,254 @@ import org.springframework.util.StringUtils;
 @Service
 public class ZroVerificationService {
 
-    private final WaterBillingCycleDao billingCycleDao;
-    private final ZroVerificationDao zroVerificationDao;
-    private final DJBMonthlyDemandService demandService;
+	private final WaterBillingCycleDao billingCycleDao;
+	private final ZroVerificationDao zroVerificationDao;
+	private final DJBMonthlyDemandService demandService;
 
-    public ZroVerificationService(
-            WaterBillingCycleDao billingCycleDao,
-            ZroVerificationDao zroVerificationDao,
-            DJBMonthlyDemandService demandService) {
-        this.billingCycleDao = billingCycleDao;
-        this.zroVerificationDao = zroVerificationDao;
-        this.demandService = demandService;
-    }
+	public ZroVerificationService(WaterBillingCycleDao billingCycleDao, ZroVerificationDao zroVerificationDao,
+			DJBMonthlyDemandService demandService) {
+		this.billingCycleDao = billingCycleDao;
+		this.zroVerificationDao = zroVerificationDao;
+		this.demandService = demandService;
+	}
 
-    @Transactional
-    public ZroVerificationResult update(RequestInfo requestInfo, String billingCycleId,
-            String action, String remarks) {
+	@Transactional
+	public ZroVerificationResult update(RequestInfo requestInfo, String billingCycleId, String action, String remarks) {
 
-        if (requestInfo == null || requestInfo.getUserInfo() == null
-                || !StringUtils.hasText(requestInfo.getUserInfo().getUuid())) {
-            throw new IllegalArgumentException("RequestInfo.userInfo.uuid is required for ZRO action");
-        }
+		validateRequestInfo(requestInfo);
 
-        String tenantId = requestInfo.getUserInfo().getTenantId();
-        if (!StringUtils.hasText(tenantId)) {
-            throw new IllegalArgumentException("RequestInfo.userInfo.tenantId is required for ZRO action");
-        }
+		String tenantId = requestInfo.getUserInfo().getTenantId();
+		WaterBillingCycle cycle = billingCycleDao.findById(tenantId, billingCycleId);
 
-        WaterBillingCycle cycle = billingCycleDao.findById(tenantId, billingCycleId);
-        if (cycle == null) {
-            throw new IllegalArgumentException("Billing cycle not found: " + billingCycleId);
-        }
+		if (cycle == null) {
+			throw new IllegalArgumentException("Billing cycle not found: " + billingCycleId);
+		}
 
-        if (!Boolean.TRUE.equals(cycle.getOnepointfivexflag())) {
-            throw new IllegalStateException("ZRO action is only valid for a DJB 1.5x flagged billing cycle");
-        }
+		if (!Boolean.TRUE.equals(cycle.getOnepointfivexflag())) {
+			throw new IllegalStateException("ZRO action is only valid for a DJB 1.5x flagged billing cycle");
+		}
 
-        String normalizedAction = action == null ? "" : action.trim().toUpperCase(Locale.ROOT);
-        if (!"APPROVE".equals(normalizedAction) && !"REJECT".equals(normalizedAction)) {
-            throw new IllegalArgumentException("ZRO action must be APPROVE or REJECT");
-        }
+		String normalizedAction = action == null ? "" : action.trim().toUpperCase(Locale.ROOT);
 
-        String actor = requestInfo.getUserInfo().getUuid();
-        ZroVerification verification = zroVerificationDao.findByBillingCycle(tenantId, billingCycleId);
-        if (verification == null) {
-            long now = System.currentTimeMillis();
-            verification = new ZroVerification();
-            verification.setId(UUID.randomUUID().toString());
-            verification.setTenantid(tenantId);
-            verification.setBillingcycleid(cycle.getId());
-            verification.setConnectionno(cycle.getConnectionno());
-            verification.setConsumption(cycle.getActualconsumption());
-            verification.setPreviousconsumption(cycle.getPreviousconsumption());
-            verification.setDeviationfactor(cycle.getDeviationfactor());
-            verification.setStatus(ZroStatus.PENDING);
-            verification.setCreatedby(actor);
-            verification.setCreatedtime(now);
-            verification.setLastmodifiedby(actor);
-            verification.setLastmodifiedtime(now);
-            zroVerificationDao.save(verification);
-        }
+		if (!"APPROVE".equals(normalizedAction) && !"REJECT".equals(normalizedAction)) {
+			throw new IllegalArgumentException("ZRO action must be APPROVE or REJECT");
+		}
 
-        if (ZroStatus.APPROVED.equals(verification.getStatus())
-                || ZroStatus.REJECTED.equals(verification.getStatus())) {
-            if (("APPROVE".equals(normalizedAction) && ZroStatus.APPROVED.equals(verification.getStatus()))
-                    || ("REJECT".equals(normalizedAction) && ZroStatus.REJECTED.equals(verification.getStatus()))) {
-                return result(cycle, verification, cycle.getDemandid(), cycle.getBillid(),
-                        "ZRO action already applied");
-            }
-            throw new IllegalStateException(
-                    "ZRO verification is already " + verification.getStatus()
-                            + " for billing cycle " + billingCycleId);
-        }
+		String actor = requestInfo.getUserInfo().getUuid();
+		ZroVerification verification = zroVerificationDao.findByBillingCycle(tenantId, billingCycleId);
 
-        long now = System.currentTimeMillis();
-        verification.setRemarks(StringUtils.hasText(remarks) ? remarks.trim() : verification.getRemarks());
-        verification.setActionby(actor);
-        verification.setActiondate(now);
-        verification.setLastmodifiedby(actor);
-        verification.setLastmodifiedtime(now);
+		/*
+		 * A valid ZRO action must operate on the verification generated by the billing
+		 * cycle. If the record is unexpectedly missing, create a PENDING record from
+		 * the immutable billing-cycle values so the action remains auditable and
+		 * idempotent.
+		 */
+		if (verification == null) {
+			verification = createPendingVerification(cycle, actor);
+			if (zroVerificationDao.save(verification) != 1) {
+				throw new IllegalStateException(
+						"Failed to create ZRO verification for billing cycle " + billingCycleId);
+			}
+		}
 
-        if ("REJECT".equals(normalizedAction)) {
-            verification.setStatus(ZroStatus.REJECTED);
-            cycle.setZrostatus(ZroStatus.REJECTED);
-            cycle.setZroremarks(verification.getRemarks());
-            cycle.setStatus(BillingCycleStatus.CALCULATED);
-            cycle.setLastmodifiedby(actor);
-            cycle.setLastmodifiedtime(now);
-            zroVerificationDao.update(verification);
-            billingCycleDao.update(cycle);
+		/*
+		 * A terminal ZRO decision is immutable for a billing cycle. This prevents an
+		 * APPROVE/REJECT request from accidentally reversing a previous decision.
+		 */
+		if (ZroStatus.APPROVED.equals(verification.getStatus())
+				|| ZroStatus.REJECTED.equals(verification.getStatus())) {
 
-            return result(cycle, verification, null, null, "DJB 1.5x consumption rejected by ZRO verification");
-        }
+			if (isSameTerminalAction(normalizedAction, verification.getStatus())) {
+				return result(cycle, verification, cycle.getDemandid(), cycle.getBillid(),
+						"ZRO action already applied");
+			}
 
-        verification.setStatus(ZroStatus.APPROVED);
-        cycle.setZrostatus(ZroStatus.APPROVED);
-        cycle.setZroremarks(verification.getRemarks());
-        cycle.setStatus(BillingCycleStatus.CALCULATED);
-        cycle.setLastmodifiedby(actor);
-        cycle.setLastmodifiedtime(now);
-        zroVerificationDao.update(verification);
-        billingCycleDao.update(cycle);
+			throw new IllegalStateException(
+					"ZRO verification is already " + verification.getStatus() + " for billing cycle " + billingCycleId);
+		}
 
-        // createDemand() is allowed to proceed once cycle.zrostatus == APPROVED.
-        // It performs the normal DJB calculation -> generic demand save -> bill fetch.
-        DJBMonthlyDemandService.DemandResult demandResult = demandService.createDemand(requestInfo, cycle);
+		/*
+		 * A ZRO action is expected only while verification is PENDING. Treat any
+		 * unexpected status as invalid rather than silently changing the workflow.
+		 */
+		if (!ZroStatus.PENDING.equals(verification.getStatus())) {
+			throw new IllegalStateException(
+					"ZRO verification is not in PENDING state for billing cycle " + billingCycleId);
+		}
 
-        if (!demandResult.isDemandCreated() || demandResult.getDemand() == null
-                || !StringUtils.hasText(demandResult.getDemand().getId())) {
-            throw new IllegalStateException("ZRO approval did not create a demand for billing cycle " + billingCycleId);
-        }
+		long now = System.currentTimeMillis();
+		String finalRemarks = StringUtils.hasText(remarks) ? remarks.trim() : verification.getRemarks();
 
-        Demand demand = demandResult.getDemand();
-        cycle.setDemandid(demand.getId());
-        cycle.setBillid(demandResult.getBillId());
-        cycle.setStatus(StringUtils.hasText(demandResult.getBillId())
-                ? BillingCycleStatus.BILL_GENERATED
-                : BillingCycleStatus.DEMAND_CREATED);
-        cycle.setLastmodifiedby(actor);
-        cycle.setLastmodifiedtime(System.currentTimeMillis());
-        billingCycleDao.update(cycle);
+		verification.setRemarks(finalRemarks);
+		verification.setActionby(actor);
+		verification.setActiondate(now);
+		verification.setLastmodifiedby(actor);
+		verification.setLastmodifiedtime(now);
 
-        return result(cycle, verification, demand.getId(), demandResult.getBillId(),
-                "DJB 1.5x consumption approved; demand and bill generated");
-    }
+		if ("REJECT".equals(normalizedAction)) {
+			/*
+			 * REJECT is terminal for the high-consumption approval decision, but it is
+			 * NOT a terminal billing decision. As per the DJB 1.5x rule, once ZRO rejects
+			 * the actual consumption, the cycle must fall back to average/provisional
+			 * billing using historical consumption.
+			 */
+			if (StringUtils.hasText(cycle.getDemandid()) || StringUtils.hasText(cycle.getBillid())) {
+				throw new IllegalStateException("Cannot reject ZRO verification because demand/bill already exists "
+						+ "for billing cycle " + billingCycleId);
+			}
 
-    private ZroVerificationResult result(
-            WaterBillingCycle cycle,
-            ZroVerification verification,
-            String demandId,
-            String billId,
-            String message) {
-        return ZroVerificationResult.builder()
-                .verification(verification)
-                .billingCycle(cycle)
-                .demandId(demandId)
-                .billId(billId)
-                .message(message)
-                .build();
-    }
+			verification.setStatus(ZroStatus.REJECTED);
 
-    @lombok.Data
-    @lombok.Builder
-    public static class ZroVerificationResult {
-        private ZroVerification verification;
-        private WaterBillingCycle billingCycle;
-        private String demandId;
-        private String billId;
-        private String message;
-    }
+			cycle.setZrostatus(ZroStatus.REJECTED);
+			cycle.setZroremarks(finalRemarks);
+			cycle.setZroactionby(actor);
+			cycle.setZroactiondate(now);
+			cycle.setStatus(BillingCycleStatus.CALCULATED);
+			cycle.setLastmodifiedby(actor);
+			cycle.setLastmodifiedtime(now);
+
+			if (zroVerificationDao.update(verification) != 1) {
+				throw new IllegalStateException(
+						"Failed to persist ZRO REJECTED status for billing cycle " + billingCycleId);
+			}
+
+			if (billingCycleDao.update(cycle) != 1) {
+				throw new IllegalStateException(
+						"Failed to persist billing-cycle ZRO REJECTED status for " + billingCycleId);
+			}
+
+			DJBMonthlyDemandService.DemandResult demandResult = demandService
+					.createRejectedOnePointFiveFallbackDemand(requestInfo, cycle);
+
+			if (!demandResult.isDemandCreated() || demandResult.getDemand() == null
+					|| !StringUtils.hasText(demandResult.getDemand().getId())) {
+				throw new IllegalStateException(
+						"ZRO rejection did not create the fallback provisional demand for billing cycle " + billingCycleId);
+			}
+
+			Demand demand = demandResult.getDemand();
+			cycle.setDemandid(demand.getId());
+			cycle.setBillid(demandResult.getBillId());
+			cycle.setStatus(StringUtils.hasText(demandResult.getBillId()) ? BillingCycleStatus.BILL_GENERATED
+					: BillingCycleStatus.DEMAND_CREATED);
+			cycle.setLastmodifiedby(actor);
+			cycle.setLastmodifiedtime(System.currentTimeMillis());
+
+			if (billingCycleDao.update(cycle) != 1) {
+				throw new IllegalStateException(
+						"Failed to persist fallback provisional demand/bill for billing cycle " + billingCycleId);
+			}
+
+			return result(cycle, verification, demand.getId(), demandResult.getBillId(),
+					"DJB 1.5x consumption rejected by ZRO verification; fallback provisional bill generated");
+		}
+
+		/*
+		 * APPROVE is the only path allowed to create the demand/bill for a ZRO flagged
+		 * cycle.
+		 */
+		verification.setStatus(ZroStatus.APPROVED);
+
+		cycle.setZrostatus(ZroStatus.APPROVED);
+		cycle.setZroremarks(finalRemarks);
+		cycle.setZroactionby(actor);
+		cycle.setZroactiondate(now);
+		cycle.setStatus(BillingCycleStatus.CALCULATED);
+		cycle.setLastmodifiedby(actor);
+		cycle.setLastmodifiedtime(now);
+
+		if (zroVerificationDao.update(verification) != 1) {
+			throw new IllegalStateException(
+					"Failed to persist ZRO APPROVED status for billing cycle " + billingCycleId);
+		}
+
+		if (billingCycleDao.update(cycle) != 1) {
+			throw new IllegalStateException(
+					"Failed to persist billing-cycle ZRO APPROVED status for " + billingCycleId);
+		}
+
+		/*
+		 * createDemand() is guarded by cycle.zrostatus == APPROVED, so the demand and
+		 * generic bill fetch can proceed only after the explicit ZRO approval.
+		 */
+		DJBMonthlyDemandService.DemandResult demandResult = demandService.createDemand(requestInfo, cycle);
+
+		if (!demandResult.isDemandCreated() || demandResult.getDemand() == null
+				|| !StringUtils.hasText(demandResult.getDemand().getId())) {
+			throw new IllegalStateException("ZRO approval did not create a demand for billing cycle " + billingCycleId);
+		}
+
+		Demand demand = demandResult.getDemand();
+
+		cycle.setDemandid(demand.getId());
+		cycle.setBillid(demandResult.getBillId());
+		cycle.setStatus(StringUtils.hasText(demandResult.getBillId()) ? BillingCycleStatus.BILL_GENERATED
+				: BillingCycleStatus.DEMAND_CREATED);
+		cycle.setLastmodifiedby(actor);
+		cycle.setLastmodifiedtime(System.currentTimeMillis());
+
+		if (billingCycleDao.update(cycle) != 1) {
+			throw new IllegalStateException(
+					"Failed to persist generated demand/bill details for billing cycle " + billingCycleId);
+		}
+
+		return result(cycle, verification, demand.getId(), demandResult.getBillId(),
+				"DJB 1.5x consumption approved; demand and bill generated");
+	}
+
+	private void validateRequestInfo(RequestInfo requestInfo) {
+		if (requestInfo == null || requestInfo.getUserInfo() == null
+				|| !StringUtils.hasText(requestInfo.getUserInfo().getUuid())) {
+			throw new IllegalArgumentException("RequestInfo.userInfo.uuid is required for ZRO action");
+		}
+
+		if (!StringUtils.hasText(requestInfo.getUserInfo().getTenantId())) {
+			throw new IllegalArgumentException("RequestInfo.userInfo.tenantId is required for ZRO action");
+		}
+	}
+
+	private ZroVerification createPendingVerification(WaterBillingCycle cycle, String actor) {
+
+		long now = System.currentTimeMillis();
+
+		ZroVerification verification = new ZroVerification();
+		verification.setId(UUID.randomUUID().toString());
+		verification.setTenantid(cycle.getTenantid());
+		verification.setBillingcycleid(cycle.getId());
+		verification.setConnectionno(cycle.getConnectionno());
+		verification.setConsumption(cycle.getActualconsumption());
+		verification.setPreviousconsumption(cycle.getPreviousconsumption());
+		verification.setDeviationfactor(cycle.getDeviationfactor());
+		verification.setStatus(ZroStatus.PENDING);
+		verification.setRemarks(cycle.getZroremarks());
+		verification.setCreatedby(actor);
+		verification.setCreatedtime(now);
+		verification.setLastmodifiedby(actor);
+		verification.setLastmodifiedtime(now);
+
+		return verification;
+	}
+
+	private boolean isSameTerminalAction(String action, ZroStatus status) {
+
+		return ("APPROVE".equals(action) && ZroStatus.APPROVED.equals(status))
+				|| ("REJECT".equals(action) && ZroStatus.REJECTED.equals(status));
+	}
+
+	private ZroVerificationResult result(WaterBillingCycle cycle, ZroVerification verification, String demandId,
+			String billId, String message) {
+
+		return ZroVerificationResult.builder().verification(verification).billingCycle(cycle).demandId(demandId)
+				.billId(billId).message(message).build();
+	}
+
+	@lombok.Data
+	@lombok.Builder
+	public static class ZroVerificationResult {
+		private ZroVerification verification;
+		private WaterBillingCycle billingCycle;
+		private String demandId;
+		private String billId;
+		private String message;
+	}
 }

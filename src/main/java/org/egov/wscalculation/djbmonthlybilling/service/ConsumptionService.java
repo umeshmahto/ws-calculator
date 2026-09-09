@@ -41,8 +41,11 @@ public class ConsumptionService {
 		}
 
 		BigDecimal billingConsumption;
-		if (BillingBasis.AVERAGE.equals(decision.getBillingBasis())
-				&& decision.getAverageCycleCount() <= rule.getAverageMaximumCycles()) {
+		boolean withinAverageLimit = BillingBasis.AVERAGE.equals(decision.getBillingBasis())
+				&& decision.getAverageCycleCount() <= rule.getAverageMaximumCycles();
+		boolean withinProvisionalLimit = BillingBasis.PROVISIONAL.equals(decision.getBillingBasis())
+				&& decision.getProvisionalCycleCount() <= rule.getProvisionalMaximumCycles();
+		if (withinAverageLimit || withinProvisionalLimit) {
 			billingConsumption = average;
 		} else {
 			BigDecimal minimum = BigDecimal.valueOf(rule.getMinimumPostAverageConsumptionKl().longValue());

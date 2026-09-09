@@ -14,8 +14,10 @@ import org.egov.wscalculation.constants.WSCalculationConstant;
 import org.egov.wscalculation.djbmonthlybilling.model.WaterBillingCycle;
 import org.egov.wscalculation.djbmonthlybilling.model.enums.BillingCycleStatus;
 import org.egov.wscalculation.djbmonthlybilling.model.enums.CorrectionStatus;
+import org.egov.wscalculation.djbmonthlybilling.model.enums.BillingBasis;
 import org.egov.wscalculation.djbmonthlybilling.model.enums.ZroStatus;
 import org.egov.wscalculation.djbmonthlybilling.model.master.DJBAdditionalSewerageCharge;
+import org.egov.wscalculation.djbmonthlybilling.model.master.DJBMonthlyBillingRule;
 import org.egov.wscalculation.djbmonthlybilling.model.master.DJBMonthlyRebate;
 import org.egov.wscalculation.djbmonthlybilling.model.master.DJBMonthlySewerageRule;
 import org.egov.wscalculation.djbmonthlybilling.model.master.DJBMonthlyWaterTariff;
@@ -55,6 +57,7 @@ public class DJBMonthlyDemandService {
 
 	private final DJBMonthlyBillingMasterProvider masterProvider;
 	private final TariffCalculationService tariffCalculationService;
+	private final ConsumptionService consumptionService;
 	private final SewerageCalculationService sewerageCalculationService;
 	private final RebateCalculationService rebateCalculationService;
 	private final DemandRepository demandRepository;
@@ -69,7 +72,7 @@ public class DJBMonthlyDemandService {
 	private final WaterBillingCycleDao billingCycleDao;
 
 	public DJBMonthlyDemandService(DJBMonthlyBillingMasterProvider masterProvider,
-			TariffCalculationService tariffCalculationService, SewerageCalculationService sewerageCalculationService,
+			TariffCalculationService tariffCalculationService, ConsumptionService consumptionService, SewerageCalculationService sewerageCalculationService,
 			RebateCalculationService rebateCalculationService, DemandRepository demandRepository,
 			CalculatorUtil calculatorUtil, WSCalculationUtil wsCalculationUtil, WSCalculationConfiguration config,
 			ServiceRequestRepository serviceRequestRepository, ObjectMapper objectMapper,
@@ -78,6 +81,7 @@ public class DJBMonthlyDemandService {
 
 		this.masterProvider = masterProvider;
 		this.tariffCalculationService = tariffCalculationService;
+		this.consumptionService = consumptionService;
 		this.sewerageCalculationService = sewerageCalculationService;
 		this.rebateCalculationService = rebateCalculationService;
 		this.demandRepository = demandRepository;
@@ -156,30 +160,31 @@ public class DJBMonthlyDemandService {
 				&& "DOMESTIC".equalsIgnoreCase(category)
 				&& !ZroStatus.APPROVED.equals(cycle.getZrostatus())) {
 
-			if (ZroStatus.REJECTED.equals(cycle.getZrostatus())) {
+			/*
+			 * PENDING means ZRO has not decided yet, so no demand may be generated.
+			 * REJECTED is different: DJB's 1.5x rule requires the rejected high
+			 * consumption to fall back to average/provisional billing rather than
+			 * disappearing from billing altogether. The ZRO rejection handler prepares
+			 * the fallback provisional billing values before calling this method.
+			 */
+			if (!ZroStatus.REJECTED.equals(cycle.getZrostatus())) {
+				cycle.setZrostatus(ZroStatus.PENDING);
+				cycle.setZroremarks("Consumption exceeds DJB 1.5x threshold; ZRO verification required");
 				cycle.setStatus(BillingCycleStatus.CALCULATED);
 				cycle.setLastmodifiedby(actorForDemand(requestInfo));
 				cycle.setLastmodifiedtime(System.currentTimeMillis());
-				billingCycleDao.update(cycle);
+
+				createPendingZroVerification(cycle, actorForDemand(requestInfo));
+
+				if (billingCycleDao.update(cycle) != 1) {
+					throw new IllegalStateException(
+							"Failed to persist DJB ZRO PENDING status for billing cycle " + cycle.getId());
+				}
+
 				return DemandResult.builder().demandCreated(false).zroRequired(true)
-						.message("Demand not generated because DJB 1.5x consumption was rejected by ZRO verification").build();
+						.message("Demand not generated because DJB 1.5x ZRO verification is required").build();
 			}
 
-			cycle.setZrostatus(ZroStatus.PENDING);
-			cycle.setZroremarks("Consumption exceeds DJB 1.5x threshold; ZRO verification required");
-			cycle.setStatus(BillingCycleStatus.CALCULATED);
-			cycle.setLastmodifiedby(actorForDemand(requestInfo));
-			cycle.setLastmodifiedtime(System.currentTimeMillis());
-
-			createPendingZroVerification(cycle, actorForDemand(requestInfo));
-
-			if (billingCycleDao.update(cycle) != 1) {
-				throw new IllegalStateException(
-						"Failed to persist DJB ZRO PENDING status for billing cycle " + cycle.getId());
-			}
-
-			return DemandResult.builder().demandCreated(false).zroRequired(true)
-					.message("Demand not generated because DJB 1.5x ZRO verification is required").build();
 		}
 
 		List<DJBMonthlyWaterTariff> tariffs = masterProvider.getWaterTariffs(requestInfo, tenantId);
@@ -372,6 +377,75 @@ public class DJBMonthlyDemandService {
 				.message(StringUtils.hasText(billId) ? "DJB demand and bill created successfully"
 						: "DJB demand created successfully")
 				.build();
+	}
+
+	/**
+	 * Generates the fallback bill required when a domestic DJB 1.5x case is rejected
+	 * by ZRO. The rejected actual consumption is NOT billed; the cycle is converted
+	 * to DJB provisional billing. For the first two consecutive provisional rounds
+	 * the billing consumption is the past actual average; from the next round onward
+	 * it is the higher of past average and the configured 25 KL floor.
+	 */
+	public DemandResult createRejectedOnePointFiveFallbackDemand(RequestInfo requestInfo, WaterBillingCycle cycle) {
+		validateCycle(cycle);
+
+		if (!Boolean.TRUE.equals(cycle.getOnepointfivexflag())) {
+			throw new IllegalArgumentException(
+					"Rejected 1.5x fallback billing is only valid for a DJB 1.5x flagged billing cycle");
+		}
+
+		if (StringUtils.hasText(cycle.getDemandid()) || StringUtils.hasText(cycle.getBillid())) {
+			throw new IllegalStateException(
+					"Cannot generate rejected 1.5x fallback bill because demand/bill already exists for billing cycle "
+							+ cycle.getId());
+		}
+
+		String tenantId = cycle.getTenantid();
+		String connectionNo = cycle.getConnectionno();
+		DJBMonthlyBillingRule rule = masterProvider.getBillingRule(requestInfo, tenantId);
+
+		BigDecimal historicalAverage = consumptionService.calculateHistoricalAverage(tenantId, connectionNo,
+				cycle.getBillingperiodto(), rule.getAverageLookbackMonths());
+		if (historicalAverage == null) {
+			throw new IllegalStateException(
+					"No actual consumption history is available for rejected DJB 1.5x fallback billing");
+		}
+
+		int consecutiveEstimatedCycles = 0;
+		List<WaterBillingCycle> recent = billingCycleDao.findCyclesForConnection(tenantId, connectionNo,
+				cycle.getBillingperiodto(), 24);
+		if (recent != null) {
+			for (WaterBillingCycle previous : recent) {
+				if (BillingBasis.AVERAGE.equals(previous.getBillingbasis())
+						|| BillingBasis.PROVISIONAL.equals(previous.getBillingbasis())) {
+					consecutiveEstimatedCycles++;
+				} else {
+					break;
+				}
+			}
+		}
+
+		int currentProvisionalCycle = consecutiveEstimatedCycles + 1;
+		BigDecimal minimumPostAverage = BigDecimal.valueOf(rule.getMinimumPostAverageConsumptionKl().longValue());
+		BigDecimal billingConsumption = currentProvisionalCycle <= rule.getProvisionalMaximumCycles()
+				? historicalAverage
+				: historicalAverage.max(minimumPostAverage);
+
+		cycle.setAverageconsumption(historicalAverage);
+		cycle.setBillingconsumption(billingConsumption);
+		cycle.setBillingbasis(BillingBasis.PROVISIONAL);
+		cycle.setAveragecyclecount(0);
+		cycle.setProvisionalcyclecount(currentProvisionalCycle);
+		cycle.setStatus(BillingCycleStatus.CALCULATED);
+		cycle.setLastmodifiedby(actorForDemand(requestInfo));
+		cycle.setLastmodifiedtime(System.currentTimeMillis());
+
+		if (billingCycleDao.update(cycle) != 1) {
+			throw new IllegalStateException(
+					"Failed to persist rejected DJB 1.5x fallback billing values for " + cycle.getId());
+		}
+
+		return createDemand(requestInfo, cycle);
 	}
 
 	/**
