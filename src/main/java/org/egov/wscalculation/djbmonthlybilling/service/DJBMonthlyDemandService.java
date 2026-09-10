@@ -416,8 +416,13 @@ public class DJBMonthlyDemandService {
 				cycle.getBillingperiodto(), 24);
 		if (recent != null) {
 			for (WaterBillingCycle previous : recent) {
-				if (BillingBasis.AVERAGE.equals(previous.getBillingbasis())
-						|| BillingBasis.PROVISIONAL.equals(previous.getBillingbasis())) {
+				/*
+				 * A ZRO rejection starts a DJB PROVISIONAL billing sequence. Do not
+				 * consume the two-cycle provisional allowance because an older cycle was
+				 * billed on the separate AVERAGE basis (for example MLOC/PLOC/RDDT/ADF).
+				 * The DJB rules treat those as different billing treatments.
+				 */
+				if (BillingBasis.PROVISIONAL.equals(previous.getBillingbasis())) {
 					consecutiveEstimatedCycles++;
 				} else {
 					break;
