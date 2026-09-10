@@ -8,6 +8,7 @@ import org.egov.common.contract.request.RequestInfo;
 import org.egov.wscalculation.repository.WSCalculationDao;
 import org.egov.wscalculation.validator.WSCalculationValidator;
 import org.egov.wscalculation.validator.WSCalculationWorkflowValidator;
+import org.egov.wscalculation.djbmonthlybilling.service.DJBShadowMeterBillingService;
 import org.egov.wscalculation.web.models.CalculationCriteria;
 import org.egov.wscalculation.web.models.CalculationReq;
 import org.egov.wscalculation.web.models.MeterConnectionRequest;
@@ -33,6 +34,9 @@ public class MeterServicesImpl implements MeterService {
 	
 	@Autowired
 	private EstimationService estimationService;
+
+	@Autowired
+	private DJBShadowMeterBillingService djbShadowMeterBillingService;
 
 	private EnrichmentService enrichmentService;
 	
@@ -62,7 +66,16 @@ public class MeterServicesImpl implements MeterService {
 		meterReadingsList.add(meterConnectionRequest.getMeterReading());
 		wSCalculationDao.saveMeterReading(meterConnectionRequest);
 		if (meterConnectionRequest.getMeterReading().getGenerateDemand()) {
-			generateDemandForMeterReading(meterReadingsList, meterConnectionRequest.getRequestInfo());
+			if ("dl.djb".equalsIgnoreCase(meterConnectionRequest.getMeterReading().getTenantId())) {
+				/*
+				 * DJB monthly billing is now the real create flow for DJB meter readings.
+				 * Do not invoke the legacy current-reading-minus-last-reading demand path.
+				 */
+				djbShadowMeterBillingService.processDjbBilling(
+						meterConnectionRequest.getMeterReading(), meterConnectionRequest.getRequestInfo());
+			} else {
+				generateDemandForMeterReading(meterReadingsList, meterConnectionRequest.getRequestInfo());
+			}
 		}
 		return meterReadingsList;
 	}

@@ -17,7 +17,8 @@ import org.egov.wscalculation.djbmonthlybilling.service.dto.BillingBasisDecision
 import org.egov.wscalculation.djbmonthlybilling.service.dto.ConsumptionResult;
 import org.egov.wscalculation.djbmonthlybilling.service.dto.MonthlyBillingCalculationResult;
 import org.egov.wscalculation.djbmonthlybilling.service.master.DJBMonthlyBillingMasterProvider;
-import org.egov.wscalculation.service.MeterService;
+import org.egov.wscalculation.repository.WSCalculationDao;
+import org.egov.wscalculation.service.EnrichmentService;
 import org.egov.wscalculation.web.models.MeterConnectionRequest;
 import org.egov.wscalculation.web.models.MeterReading;
 import org.springframework.stereotype.Service;
@@ -27,18 +28,21 @@ import org.springframework.util.StringUtils;
 @Service
 public class DJBShadowMeterBillingService {
 
-	private final MeterService meterService;
+	private final WSCalculationDao wSCalculationDao;
+	private final EnrichmentService enrichmentService;
 	private final DJBMonthlyBillingMasterProvider masterProvider;
 	private final DJBMonthlyBillingService monthlyBillingService;
 	private final WaterBillingCycleDao billingCycleDao;
 	private final CorrectionService correctionService;
 	private final DJBMonthlyDemandService demandService;
 
-	public DJBShadowMeterBillingService(MeterService meterService, DJBMonthlyBillingMasterProvider masterProvider,
-			DJBMonthlyBillingService monthlyBillingService, WaterBillingCycleDao billingCycleDao,
-			CorrectionService correctionService, DJBMonthlyDemandService demandService) {
+	public DJBShadowMeterBillingService(WSCalculationDao wSCalculationDao, EnrichmentService enrichmentService,
+			DJBMonthlyBillingMasterProvider masterProvider, DJBMonthlyBillingService monthlyBillingService,
+			WaterBillingCycleDao billingCycleDao, CorrectionService correctionService,
+			DJBMonthlyDemandService demandService) {
 
-		this.meterService = meterService;
+		this.wSCalculationDao = wSCalculationDao;
+		this.enrichmentService = enrichmentService;
 		this.masterProvider = masterProvider;
 		this.monthlyBillingService = monthlyBillingService;
 		this.billingCycleDao = billingCycleDao;
@@ -54,29 +58,33 @@ public class DJBShadowMeterBillingService {
 		MeterReading reading = request.getMeterReading();
 
 		/*
-		 * Shadow endpoint reuses the existing meter create flow for persistence only.
-		 * It must not invoke the generic current-reading minus last-reading demand
-		 * path.
+		 * Shadow endpoint persists the reading directly through the DAO and then runs
+		 * the exact same DJB monthly-billing orchestration used by the real
+		 * /meterConnection/_create flow. This avoids a MeterService ->
+		 * DJBShadowMeterBillingService -> MeterService circular dependency while
+		 * keeping the legacy demand path out.
 		 */
 		Boolean originalGenerateDemand = reading.getGenerateDemand();
 		reading.setGenerateDemand(Boolean.FALSE);
 
 		try {
+			reading.setStatus(null);
+			enrichmentService.enrichMeterReadingRequest(request.getRequestInfo(), reading);
 			MeterConnectionRequest persistenceRequest = MeterConnectionRequest.builder()
 					.requestInfo(request.getRequestInfo()).meterReading(reading).build();
-
-			List<MeterReading> saved = meterService.createMeterReading(persistenceRequest);
+			wSCalculationDao.saveMeterReading(persistenceRequest);
 
 			processDjbBilling(reading, request.getRequestInfo());
 
-			return saved;
+			return java.util.Collections.singletonList(reading);
 
 		} finally {
 			reading.setGenerateDemand(originalGenerateDemand);
 		}
 	}
 
-	private void processDjbBilling(MeterReading reading, RequestInfo requestInfo) {
+	@Transactional
+	public void processDjbBilling(MeterReading reading, RequestInfo requestInfo) {
 
 		String tenantId = reading.getTenantId();
 		String connectionNo = reading.getConnectionNo();
