@@ -18,36 +18,26 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/djbZroVerification")
 public class DJBZroVerificationController {
 
-    private final ResponseInfoFactory responseInfoFactory;
-    private final ZroVerificationService zroVerificationService;
+	private final ResponseInfoFactory responseInfoFactory;
+	private final ZroVerificationService zroVerificationService;
 
-    public DJBZroVerificationController(
-            ResponseInfoFactory responseInfoFactory,
-            ZroVerificationService zroVerificationService) {
-        this.responseInfoFactory = responseInfoFactory;
-        this.zroVerificationService = zroVerificationService;
-    }
+	public DJBZroVerificationController(ResponseInfoFactory responseInfoFactory,
+			ZroVerificationService zroVerificationService) {
+		this.responseInfoFactory = responseInfoFactory;
+		this.zroVerificationService = zroVerificationService;
+	}
 
-    @RequestMapping(value = "/_update", method = RequestMethod.POST, produces = "application/json")
-    public ResponseEntity<DJBZroVerificationResponse> update(
-            @Valid @RequestBody DJBZroVerificationRequest request) {
+	@RequestMapping(value = "/_update", method = RequestMethod.POST, produces = "application/json")
+	public ResponseEntity<DJBZroVerificationResponse> update(@Valid @RequestBody DJBZroVerificationRequest request) {
 
-        ZroVerificationResult result = zroVerificationService.update(
-                request.getRequestInfo(),
-                request.getBillingCycleId(),
-                request.getAction(),
-                request.getRemarks());
+		ZroVerificationResult result = zroVerificationService.update(request.getRequestInfo(),
+				request.getBillingCycleId(), request.getAction(), request.getRemarks());
 
-        DJBZroVerificationResponse response = DJBZroVerificationResponse.builder()
-                .responseInfo(responseInfoFactory.createResponseInfoFromRequestInfo(
-                        request.getRequestInfo(), true))
-                .verification(result.getVerification())
-                .billingCycle(result.getBillingCycle())
-                .demandId(result.getDemandId())
-                .billId(result.getBillId())
-                .message(result.getMessage())
-                .build();
+		DJBZroVerificationResponse response = DJBZroVerificationResponse.builder()
+				.responseInfo(responseInfoFactory.createResponseInfoFromRequestInfo(request.getRequestInfo(), true))
+				.verification(result.getVerification()).billingCycle(result.getBillingCycle())
+				.demandId(result.getDemandId()).billId(result.getBillId()).message(result.getMessage()).build();
 
-        return new ResponseEntity<>(response, HttpStatus.OK);
-    }
+		return new ResponseEntity<>(response, HttpStatus.OK);
+	}
 }

@@ -62,17 +62,18 @@ public class MeterServicesImpl implements MeterService {
 			wsCalulationWorkflowValidator.applicationValidation(meterConnectionRequest.getRequestInfo(),meterConnectionRequest.getMeterReading().getTenantId(),meterConnectionRequest.getMeterReading().getConnectionNo(),genratedemand);
 			wsCalculationValidator.validateMeterReading(meterConnectionRequest.getRequestInfo(),meterConnectionRequest.getMeterReading(), true);
 		}
+		if (meterConnectionRequest.getMeterReading().getGenerateDemand()
+				&& "dl.djb".equalsIgnoreCase(meterConnectionRequest.getMeterReading().getTenantId())) {
+			djbShadowMeterBillingService.validateCanCreateBillingCycle(meterConnectionRequest.getMeterReading());
+		}
+
 		enrichmentService.enrichMeterReadingRequest(meterConnectionRequest.getRequestInfo(),meterConnectionRequest.getMeterReading());
 		meterReadingsList.add(meterConnectionRequest.getMeterReading());
 		wSCalculationDao.saveMeterReading(meterConnectionRequest);
 		if (meterConnectionRequest.getMeterReading().getGenerateDemand()) {
 			if ("dl.djb".equalsIgnoreCase(meterConnectionRequest.getMeterReading().getTenantId())) {
-				/*
-				 * DJB monthly billing is now the real create flow for DJB meter readings.
-				 * Do not invoke the legacy current-reading-minus-last-reading demand path.
-				 */
-				djbShadowMeterBillingService.processDjbBilling(
-						meterConnectionRequest.getMeterReading(), meterConnectionRequest.getRequestInfo());
+
+				djbShadowMeterBillingService.processDjbBilling(meterConnectionRequest.getMeterReading(), meterConnectionRequest.getRequestInfo());
 			} else {
 				generateDemandForMeterReading(meterReadingsList, meterConnectionRequest.getRequestInfo());
 			}

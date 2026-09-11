@@ -20,34 +20,27 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/djbMeterConnection")
 public class DJBMeterReadingTestController {
 
-    private final ResponseInfoFactory responseInfoFactory;
-    private final DJBShadowMeterBillingService shadowMeterBillingService;
+	private final ResponseInfoFactory responseInfoFactory;
+	private final DJBShadowMeterBillingService shadowMeterBillingService;
 
-    public DJBMeterReadingTestController(ResponseInfoFactory responseInfoFactory,DJBShadowMeterBillingService shadowMeterBillingService) {
-        this.responseInfoFactory = responseInfoFactory;
-        this.shadowMeterBillingService = shadowMeterBillingService;
-    }
+	public DJBMeterReadingTestController(ResponseInfoFactory responseInfoFactory,DJBShadowMeterBillingService shadowMeterBillingService) {
+		this.responseInfoFactory = responseInfoFactory;
+		this.shadowMeterBillingService = shadowMeterBillingService;
+	}
 
-    /**
-     * DJB-only test endpoint.
-     *
-     * Request body: same MeterConnectionRequest used by
-     * /meterConnection/_create.
-     *
-     * Response: exactly the same MeterReadingResponse type.
-     *
-     * Difference: legacy immediate demand generation is intentionally not
-     * executed. The DJB billing-cycle calculation runs instead.
-     */
-    @RequestMapping(value = "/_create", method = RequestMethod.POST, produces = "application/json")
-    public ResponseEntity<MeterReadingResponse> create(@Valid @RequestBody MeterConnectionRequest request) {
+	/**
+	 * DJB-only test endpoint. Difference: legacy immediate demand generation is
+	 * intentionally not executed. The DJB billing-cycle calculation runs instead.
+	 */
+	@RequestMapping(value = "/_create", method = RequestMethod.POST, produces = "application/json")
+	public ResponseEntity<MeterReadingResponse> create(@Valid @RequestBody MeterConnectionRequest request) {
 
-        List<MeterReading> meterReadings = shadowMeterBillingService.createAndCalculate(request);
+		List<MeterReading> meterReadings = shadowMeterBillingService.createAndCalculate(request);
 
-        MeterReadingResponse response = MeterReadingResponse.builder().meterReadings(meterReadings)
-                        .responseInfo(responseInfoFactory.createResponseInfoFromRequestInfo(request.getRequestInfo(),true))
-                        .build();
+		MeterReadingResponse response = MeterReadingResponse.builder().meterReadings(meterReadings)
+				.responseInfo(responseInfoFactory.createResponseInfoFromRequestInfo(request.getRequestInfo(), true))
+				.build();
 
-        return new ResponseEntity<>(response, HttpStatus.OK);
-    }
+		return new ResponseEntity<>(response, HttpStatus.OK);
+	}
 }

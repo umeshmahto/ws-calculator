@@ -16,19 +16,16 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/djb/monthly-billing")
 public class DJBMonthlyBillingTestController {
 
-    private final DJBMonthlyBillingTestService testService;
+	private final DJBMonthlyBillingTestService testService;
 
-    public DJBMonthlyBillingTestController(
-            DJBMonthlyBillingTestService testService) {
-        this.testService = testService;
-    }
+	public DJBMonthlyBillingTestController(DJBMonthlyBillingTestService testService) {
+		this.testService = testService;
+	}
 
-    @PostMapping("/_test")
-    public ResponseEntity<DJBMonthlyBillingTestResponse> calculate(
-            @Valid @RequestBody DJBMonthlyBillingTestRequest request) {
+	@PostMapping("/_test")
+	public ResponseEntity<DJBMonthlyBillingTestResponse> calculate(
+			@Valid @RequestBody DJBMonthlyBillingTestRequest request) {
 
-        return new ResponseEntity<>(
-                testService.calculate(request),
-                HttpStatus.OK);
-    }
+		return new ResponseEntity<>(testService.calculate(request), HttpStatus.OK);
+	}
 }
