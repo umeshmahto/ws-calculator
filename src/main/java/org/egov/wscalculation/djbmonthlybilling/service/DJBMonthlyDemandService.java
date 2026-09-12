@@ -212,7 +212,8 @@ public class DJBMonthlyDemandService {
 
 		RebateCalculationContext rebateContext = RebateCalculationContext.builder().consumption(consumption)
 				.billingBasis(cycle.getBillingbasis()).readingQualityCode(cycle.getReadingqualitycode())
-				.consumerType(category).propertyCategory(category).connectionType(category).bulkConnection(false)
+				.consumerType(resolveConsumerType(category)).propertyCategory(resolvePropertyCategory(category))
+				.connectionType(category).bulkConnection(false)
 				.propertyAreaSqm(property.getSuperBuiltUpArea()).functionalRwh(false)
 				.functionalWastewaterRecycling(false).totalBillBeforeRebate(grossAmount)
 				.freeWaterEligibleAmount(water.getTotalWaterCharge()).build();
@@ -643,6 +644,14 @@ public class DJBMonthlyDemandService {
 		}
 
 		throw new IllegalStateException("No owner/payer found for water connection " + connection.getConnectionNo());
+	}
+
+	private String resolveConsumerType(String category) {
+		return "DOMESTIC".equalsIgnoreCase(category) ? "INDIVIDUAL_RESIDENCE" : "COMMERCIAL";
+	}
+
+	private String resolvePropertyCategory(String category) {
+		return "DOMESTIC".equalsIgnoreCase(category) ? "CAT_I" : "CAT_II";
 	}
 
 	private String resolveTariffCategory(WaterConnection connection, Property property) {

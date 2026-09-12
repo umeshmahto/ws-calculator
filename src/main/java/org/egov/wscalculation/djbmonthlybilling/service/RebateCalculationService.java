@@ -134,14 +134,11 @@ public class RebateCalculationService {
 		}
 
 		/*
-		 * DJB specifies the 20 KL rebate only for Meter OK basis. We require both the
-		 * billing basis and the field remark to agree.
+		 * Prefer the eligibility lists in MDMS so that the billing rule remains
+		 * configuration-driven. When a master does not provide a list, retain the DJB
+		 * default of Meter OK / ACTUAL for the free-water rule.
 		 */
-		if (!BillingBasis.ACTUAL.equals(context.getBillingBasis())) {
-			return false;
-		}
-
-		if (!"OK".equalsIgnoreCase(context.getReadingQualityCode())) {
+		if (!isEligibleReadingAndBasis(context, rule)) {
 			return false;
 		}
 
@@ -163,6 +160,27 @@ public class RebateCalculationService {
 		}
 
 		return true;
+	}
+
+	private boolean isEligibleReadingAndBasis(RebateCalculationContext context, DJBMonthlyRebate rule) {
+		boolean readingEligible = rule.getEligibleReadingQualityCodes() == null
+				|| rule.getEligibleReadingQualityCodes().isEmpty() || rule.getEligibleReadingQualityCodes().stream()
+						.anyMatch(code -> code != null && code.equalsIgnoreCase(context.getReadingQualityCode()));
+
+		boolean basisEligible = rule.getEligibleBillingBasis() == null || rule.getEligibleBillingBasis().isEmpty()
+				|| rule.getEligibleBillingBasis().stream().anyMatch(basis -> basis != null && basis
+						.equalsIgnoreCase(context.getBillingBasis() == null ? null : context.getBillingBasis().name()));
+
+		if (rule.getEligibleReadingQualityCodes() == null || rule.getEligibleReadingQualityCodes().isEmpty()) {
+			readingEligible = "OK".equalsIgnoreCase(context.getReadingQualityCode())
+					&& BillingBasis.ACTUAL.equals(context.getBillingBasis());
+		}
+
+		if (rule.getEligibleBillingBasis() == null || rule.getEligibleBillingBasis().isEmpty()) {
+			basisEligible = BillingBasis.ACTUAL.equals(context.getBillingBasis());
+		}
+
+		return readingEligible && basisEligible;
 	}
 
 	private boolean isRwhRule(String code) {

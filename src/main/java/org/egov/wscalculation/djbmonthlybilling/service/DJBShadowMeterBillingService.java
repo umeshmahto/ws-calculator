@@ -184,7 +184,6 @@ public class DJBShadowMeterBillingService {
 		processCalculatedCycleAfterDecision(requestInfo, cycle);
 	}
 
-
 	/**
 	 * Completes billing after the DJB billing-basis decision is persisted.
 	 *
@@ -240,8 +239,7 @@ public class DJBShadowMeterBillingService {
 			return;
 		}
 
-		if (correction != null && correction.getPlan() != null
-				&& demandResult.getAppliedPaidAdjustmentAmount() != null
+		if (correction != null && correction.getPlan() != null && demandResult.getAppliedPaidAdjustmentAmount() != null
 				&& demandResult.getResidualPaidCreditAmount() != null) {
 			correction.getPlan().setAppliedPaidAdjustmentAmount(demandResult.getAppliedPaidAdjustmentAmount());
 			correction.getPlan().setResidualPaidCreditAmount(demandResult.getResidualPaidCreditAmount());
@@ -265,14 +263,16 @@ public class DJBShadowMeterBillingService {
 				try {
 					String correctedBillId = demandResult.getDemand() != null
 							? demandService.fetchBillForExistingDemand(requestInfo, demandResult.getDemand())
-							: demandService.fetchBillForExistingDemand(requestInfo, cycle.getTenantid(), cycle.getConnectionno());
+							: demandService.fetchBillForExistingDemand(requestInfo, cycle.getTenantid(),
+									cycle.getConnectionno());
 
 					if (StringUtils.hasText(correctedBillId)) {
 						cycle.setBillid(correctedBillId);
 						cycle.setStatus(BillingCycleStatus.BILL_GENERATED);
 						if (correction != null && correction.getPlan() != null) {
 							correctionService.completeAutomaticCorrection(cycle.getTenantid(), correction.getPlan(),
-									cycle.getDemandid(), correctedBillId, actor(requestInfo), System.currentTimeMillis());
+									cycle.getDemandid(), correctedBillId, actor(requestInfo),
+									System.currentTimeMillis());
 							cycle.setCorrectionstatus(CorrectionStatus.COMPLETED);
 						}
 					}
@@ -294,7 +294,8 @@ public class DJBShadowMeterBillingService {
 		} else if (!StringUtils.hasText(cycle.getBillid()) && StringUtils.hasText(cycle.getDemandid())) {
 			/*
 			 * Recovery path for a demand that was persisted successfully while bill
-			 * generation failed. The existing demand is reused; no second demand is created.
+			 * generation failed. The existing demand is reused; no second demand is
+			 * created.
 			 */
 			try {
 				String recoveredBillId = demandService.fetchBillForExistingDemand(requestInfo, cycle.getTenantid(),

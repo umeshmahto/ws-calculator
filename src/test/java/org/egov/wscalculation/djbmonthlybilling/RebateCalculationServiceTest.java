@@ -30,7 +30,7 @@ class RebateCalculationServiceTest {
                         .billingBasis(BillingBasis.ACTUAL)
                         .readingQualityCode("OK")
                         .consumerType("INDIVIDUAL_RESIDENCE")
-                        .propertyCategory("CAT-I")
+                        .propertyCategory("CAT_I")
                         .connectionType("DOMESTIC")
                         .bulkConnection(false)
                         .freeWaterEligibleAmount(bd("251.81"))
@@ -137,8 +137,10 @@ class RebateCalculationServiceTest {
         rule.setRate(bd("100"));
         rule.setMaxConsumptionKl(bd("20"));
         rule.setConsumerType("INDIVIDUAL_RESIDENCE");
-        rule.setPropertyCategory("CAT-I");
+        rule.setPropertyCategory("CAT_I");
         rule.setEligibleConnectionType("DOMESTIC");
+        rule.setEligibleReadingQualityCodes(Arrays.asList("OK"));
+        rule.setEligibleBillingBasis(Arrays.asList("ACTUAL"));
         rule.setBulkApplicable(false);
         rule.setActive(true);
         return rule;
@@ -165,6 +167,6 @@ class RebateCalculationServiceTest {
     }
 
     private BigDecimal bd(String value) {
-        return new BigDecimal(value);
-    }
+		return new BigDecimal(value);
+	}
 }
