@@ -132,6 +132,9 @@ public class DJBMonthlyBillingFetchService {
                 statement.getBill().setGenerated(false);
                 statement.getBill().setReconciliationStatus("NOT_GENERATED");
             }
+            statement.setReconciliation(DJBMonthlyBillingStatement.Reconciliation.builder()
+                    .calculatedAmount(statement.getCharges() == null ? null : statement.getCharges().getNetAmount())
+                    .status("NOT_GENERATED").build());
             return;
         }
 
@@ -151,6 +154,9 @@ public class DJBMonthlyBillingFetchService {
         statement.getBill().setDemandId(cycle.getDemandid());
         if (matchedBill == null) {
             statement.getBill().setReconciliationStatus("BILL_REFERENCE_NOT_FOUND");
+            statement.setReconciliation(DJBMonthlyBillingStatement.Reconciliation.builder()
+                    .calculatedAmount(statement.getCharges() == null ? null : statement.getCharges().getNetAmount())
+                    .status("BILL_REFERENCE_NOT_FOUND").build());
             return;
         }
         statement.getBill().setNumber(asString(getIgnoreCase(matchedBill, "billNumber")));
@@ -164,13 +170,18 @@ public class DJBMonthlyBillingFetchService {
         if (actualAmount == null || calculated == null) {
             statement.getBill().setDifference(null);
             statement.getBill().setReconciliationStatus("NOT_RECONCILED");
+            statement.setReconciliation(DJBMonthlyBillingStatement.Reconciliation.builder()
+                    .calculatedAmount(calculated).billedAmount(actualAmount).status("NOT_RECONCILED").build());
             return;
         }
 
         BigDecimal difference = actualAmount.subtract(calculated).setScale(MONEY_SCALE, RoundingMode.HALF_UP);
         statement.getBill().setDifference(difference);
-        statement.getBill().setReconciliationStatus(
-                difference.signum() == 0 ? "MATCHED" : "MISMATCH");
+        String reconciliationStatus = difference.signum() == 0 ? "MATCHED" : "MISMATCH";
+        statement.getBill().setReconciliationStatus(reconciliationStatus);
+        statement.setReconciliation(DJBMonthlyBillingStatement.Reconciliation.builder()
+                .calculatedAmount(calculated).billedAmount(actualAmount).difference(difference)
+                .status(reconciliationStatus).build());
     }
 
     private Map<String, Object> fetchBillSearch(RequestInfo requestInfo, String tenantId, String billId) {

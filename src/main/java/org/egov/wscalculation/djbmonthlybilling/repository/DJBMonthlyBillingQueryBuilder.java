@@ -198,6 +198,10 @@ public class DJBMonthlyBillingQueryBuilder {
         return "SELECT * FROM eg_ws_billingcalculation WHERE tenantid = ? AND billingcycleid = ? ORDER BY calculatedtime DESC LIMIT 1";
     }
 
+    public String updateBillingCalculationStatus() {
+        return "UPDATE eg_ws_billingcalculation SET status = ? WHERE tenantid = ? AND id = ?";
+    }
+
     public String insertBillingCalculation() {
         return "INSERT INTO eg_ws_billingcalculation (id, tenantid, billingcycleid, connectionno, engineversion, status, calculatedtime, calculatedby, snapshotjson) " +
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)";

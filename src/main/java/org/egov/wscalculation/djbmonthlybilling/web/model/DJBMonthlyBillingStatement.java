@@ -4,11 +4,15 @@ import java.math.BigDecimal;
 import java.util.Collections;
 import java.util.List;
 
+import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
+import lombok.NoArgsConstructor;
 
 @Data
 @Builder
+@NoArgsConstructor
+@AllArgsConstructor
 public class DJBMonthlyBillingStatement {
 
     private Consumer consumer;
@@ -18,12 +22,16 @@ public class DJBMonthlyBillingStatement {
     private OnePointFiveX onePointFiveX;
     private Charges charges;
     private Adjustments adjustments;
+    private CorrectionSummary correction;
+    private Reconciliation reconciliation;
     private DemandSummary demand;
     private BillSummary bill;
     private Audit audit;
 
     @Data
     @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class Consumer {
         private String tenantId;
         private String connectionNo;
@@ -34,6 +42,8 @@ public class DJBMonthlyBillingStatement {
 
     @Data
     @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class BillingCycle {
         private String id;
         private Long periodFrom;
@@ -51,6 +61,8 @@ public class DJBMonthlyBillingStatement {
 
     @Data
     @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class Reading {
         private BigDecimal previousReading;
         private Long previousReadingDate;
@@ -66,6 +78,8 @@ public class DJBMonthlyBillingStatement {
 
     @Data
     @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class BillingDecision {
         private String basis;
         private String reasonCode;
@@ -75,10 +89,15 @@ public class DJBMonthlyBillingStatement {
         private BigDecimal minimumBillingConsumption;
         private Integer averageCycleCount;
         private Integer provisionalCycleCount;
+        private String billingRuleCode;
+        private Integer configuredAverageMaximumCycles;
+        private Integer configuredProvisionalMaximumCycles;
     }
 
     @Data
     @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class OnePointFiveX {
         private boolean evaluated;
         private BigDecimal multiplier;
@@ -93,6 +112,8 @@ public class DJBMonthlyBillingStatement {
 
     @Data
     @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class Charges {
         private WaterCharges water;
         private SewerageCharges sewerage;
@@ -103,6 +124,8 @@ public class DJBMonthlyBillingStatement {
 
     @Data
     @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class WaterCharges {
         private BigDecimal consumption;
         private String unit;
@@ -117,6 +140,8 @@ public class DJBMonthlyBillingStatement {
 
     @Data
     @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class Slab {
         private BigDecimal from;
         private BigDecimal to;
@@ -128,6 +153,8 @@ public class DJBMonthlyBillingStatement {
 
     @Data
     @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class SewerageCharges {
         private BigDecimal regularCharge;
         private BigDecimal additionalCharge;
@@ -139,6 +166,8 @@ public class DJBMonthlyBillingStatement {
 
     @Data
     @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class RebateCharges {
         private BigDecimal totalRebate;
         @Builder.Default
@@ -148,6 +177,8 @@ public class DJBMonthlyBillingStatement {
 
     @Data
     @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class RebateLine {
         private String code;
         private String name;
@@ -159,6 +190,8 @@ public class DJBMonthlyBillingStatement {
 
     @Data
     @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class Adjustments {
         private BigDecimal paidCorrectionApplied;
         private BigDecimal residualPaidCreditCreated;
@@ -167,8 +200,54 @@ public class DJBMonthlyBillingStatement {
         private List<String> carriedForwardCreditAllocationIds = Collections.emptyList();
     }
 
+
     @Data
     @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class CorrectionSummary {
+        private boolean required;
+        private String status;
+        private String reasonCode;
+        private String reason;
+        private String previousOkBillingCycleId;
+        private String currentBillingCycleId;
+        private BigDecimal previousOkReading;
+        private BigDecimal currentReading;
+        private BigDecimal correctedConsumption;
+        @Builder.Default
+        private List<CorrectionCycle> supersededCycles = Collections.emptyList();
+        private BigDecimal previouslyCalculatedAmount;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class CorrectionCycle {
+        private String billingCycleId;
+        private String billingBasis;
+        private BigDecimal billingConsumption;
+        private String demandId;
+        private String billId;
+        private BigDecimal calculatedNetAmount;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class Reconciliation {
+        private BigDecimal calculatedAmount;
+        private BigDecimal billedAmount;
+        private BigDecimal difference;
+        private String status;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class DemandSummary {
         private boolean created;
         private String id;
@@ -178,6 +257,8 @@ public class DJBMonthlyBillingStatement {
 
     @Data
     @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class BillSummary {
         private boolean generated;
         private String id;
@@ -192,10 +273,19 @@ public class DJBMonthlyBillingStatement {
 
     @Data
     @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class Audit {
         private String calculationId;
         private String engineVersion;
         private Long calculatedAt;
         private String calculatedBy;
+        private String calculationStatus;
+        private String billingRuleCode;
+        private String tariffId;
+        @Builder.Default
+        private List<String> sewerageRuleCodes = Collections.emptyList();
+        @Builder.Default
+        private List<String> rebateCodes = Collections.emptyList();
     }
 }

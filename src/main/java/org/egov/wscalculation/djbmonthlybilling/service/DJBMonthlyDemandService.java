@@ -263,8 +263,12 @@ public class DJBMonthlyDemandService {
 				.setScale(MONEY_SCALE, RoundingMode.HALF_UP);
 
 		try {
+			DJBMonthlyBillingRule billingRule = null;
+			if (BillingBasis.AVERAGE.equals(cycle.getBillingbasis()) || BillingBasis.PROVISIONAL.equals(cycle.getBillingbasis())) {
+				billingRule = masterProvider.getBillingRule(requestInfo, tenantId);
+			}
 			String calculationId = calculationSnapshotService.persist(requestInfo, cycle, connection, property,
-					water, sewerage, rebate, appliedPaidAdjustment, residualPaidCredit, carryForwardCreditApplied,
+					water, sewerage, rebate, billingRule, appliedPaidAdjustment, residualPaidCredit, carryForwardCreditApplied,
 					creditReservation.getAllocationIds(), netAmount);
 			cycle.setCalculationid(calculationId);
 			cycle.setLastmodifiedby(actorForDemand(requestInfo));
@@ -358,6 +362,7 @@ public class DJBMonthlyDemandService {
 		try {
 			response = demandRepository.saveDemand(requestInfo, Collections.singletonList(demand), notification);
 		} catch (RuntimeException ex) {
+			safeUpdateSnapshotStatus(tenantId, cycle.getCalculationid(), "DEMAND_FAILED");
 			if (creditReservation.isNewReservation()) {
 				residualCreditService.releaseReservations(tenantId, cycle.getId(), actorForDemand(requestInfo),
 						System.currentTimeMillis());
@@ -385,9 +390,14 @@ public class DJBMonthlyDemandService {
 		 */
 		String billId = null;
 		if (!CorrectionStatus.PENDING.equals(cycle.getCorrectionstatus())) {
-			billId = fetchAndGetBillId(requestInfo, created);
-			residualCreditService.attachBillId(tenantId, cycle.getId(), billId, actorForDemand(requestInfo),
-					System.currentTimeMillis());
+			try {
+				billId = fetchAndGetBillId(requestInfo, created);
+				residualCreditService.attachBillId(tenantId, cycle.getId(), billId, actorForDemand(requestInfo),
+						System.currentTimeMillis());
+			} catch (RuntimeException ex) {
+				safeUpdateSnapshotStatus(tenantId, cycle.getCalculationid(), "BILL_FAILED");
+				throw ex;
+			}
 		}
 
 		cycle.setDemandid(created.getId());
@@ -396,8 +406,12 @@ public class DJBMonthlyDemandService {
 		cycle.setLastmodifiedby(actorForDemand(requestInfo));
 		cycle.setLastmodifiedtime(System.currentTimeMillis());
 		if (billingCycleDao.update(cycle) != 1) {
+			safeUpdateSnapshotStatus(tenantId, cycle.getCalculationid(), "BILL_FAILED");
 			throw new IllegalStateException("Failed to persist DJB billing cycle final state for " + cycle.getId());
 		}
+
+		safeUpdateSnapshotStatus(tenantId, cycle.getCalculationid(),
+				StringUtils.hasText(billId) ? "BILL_GENERATED" : "DEMAND_CREATED");
 
 		return DemandResult.builder().demandCreated(true).zroRequired(false).demand(created).billId(billId)
 				.grossAmount(grossAmount).rebateAmount(rebate.getTotalRebate()).netAmount(netAmount)
@@ -789,6 +803,15 @@ public class DJBMonthlyDemandService {
 		verification.setLastmodifiedby(actor);
 		verification.setLastmodifiedtime(now);
 		zroVerificationDao.save(verification);
+	}
+
+	private void safeUpdateSnapshotStatus(String tenantId, String calculationId, String status) {
+		try {
+			calculationSnapshotService.updateStatus(tenantId, calculationId, status);
+		} catch (RuntimeException ignored) {
+			// Calculation snapshot status is audit metadata. A status-update failure must
+			// not roll back or mask an already successful demand/bill generation.
+		}
 	}
 
 	private String actorForDemand(RequestInfo requestInfo) {
