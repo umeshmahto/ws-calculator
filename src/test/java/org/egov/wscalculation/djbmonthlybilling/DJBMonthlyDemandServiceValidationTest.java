@@ -86,7 +86,8 @@ class DJBMonthlyDemandServiceValidationTest {
 		assertEquals("Billing cycle is required", ex.getMessage());
 		verifyNoInteractions(masterProvider, tariffCalculationService, consumptionService, sewerageCalculationService,
 				rebateCalculationService, demandRepository, calculatorUtil, wsCalculationUtil, config,
-				serviceRequestRepository, residualCreditService, zroVerificationDao, billingCycleDao, calculationSnapshotService);
+				serviceRequestRepository, residualCreditService, zroVerificationDao, billingCycleDao,
+				calculationSnapshotService);
 	}
 
 	@Test
@@ -100,7 +101,8 @@ class DJBMonthlyDemandServiceValidationTest {
 		assertEquals("Billing cycle tenant and connection are required", ex.getMessage());
 		verifyNoInteractions(masterProvider, tariffCalculationService, consumptionService, sewerageCalculationService,
 				rebateCalculationService, demandRepository, calculatorUtil, wsCalculationUtil, config,
-				serviceRequestRepository, residualCreditService, zroVerificationDao, billingCycleDao, calculationSnapshotService);
+				serviceRequestRepository, residualCreditService, zroVerificationDao, billingCycleDao,
+				calculationSnapshotService);
 	}
 
 	@Test
@@ -114,7 +116,8 @@ class DJBMonthlyDemandServiceValidationTest {
 		assertEquals("Billing cycle tenant and connection are required", ex.getMessage());
 		verifyNoInteractions(masterProvider, tariffCalculationService, consumptionService, sewerageCalculationService,
 				rebateCalculationService, demandRepository, calculatorUtil, wsCalculationUtil, config,
-				serviceRequestRepository, residualCreditService, zroVerificationDao, billingCycleDao, calculationSnapshotService);
+				serviceRequestRepository, residualCreditService, zroVerificationDao, billingCycleDao,
+				calculationSnapshotService);
 	}
 
 	@Test
@@ -128,7 +131,8 @@ class DJBMonthlyDemandServiceValidationTest {
 		assertEquals("Billing period is required", ex.getMessage());
 		verifyNoInteractions(masterProvider, tariffCalculationService, consumptionService, sewerageCalculationService,
 				rebateCalculationService, demandRepository, calculatorUtil, wsCalculationUtil, config,
-				serviceRequestRepository, residualCreditService, zroVerificationDao, billingCycleDao, calculationSnapshotService);
+				serviceRequestRepository, residualCreditService, zroVerificationDao, billingCycleDao,
+				calculationSnapshotService);
 	}
 
 	@Test

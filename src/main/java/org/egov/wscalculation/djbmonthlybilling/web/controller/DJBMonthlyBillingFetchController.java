@@ -14,33 +14,32 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping("/djb/monthly-billing")
+@RequestMapping("/monthly-billing")
 public class DJBMonthlyBillingFetchController {
 
-    private final DJBMonthlyBillingFetchService fetchService;
-    private final ResponseInfoFactory responseInfoFactory;
+	private final DJBMonthlyBillingFetchService fetchService;
+	private final ResponseInfoFactory responseInfoFactory;
 
-    public DJBMonthlyBillingFetchController(
-            DJBMonthlyBillingFetchService fetchService,
-            ResponseInfoFactory responseInfoFactory) {
-        this.fetchService = fetchService;
-        this.responseInfoFactory = responseInfoFactory;
-    }
+	public DJBMonthlyBillingFetchController(DJBMonthlyBillingFetchService fetchService,
+			ResponseInfoFactory responseInfoFactory) {
+		this.fetchService = fetchService;
+		this.responseInfoFactory = responseInfoFactory;
+	}
 
-    /**
-     * Read-only production billing-statement endpoint.
-     * The calculation section is loaded from the immutable persisted calculation
-     * snapshot used to generate the demand/bill; the billing-service is queried
-     * only to enrich and reconcile the final bill details.
-     */
-    @PostMapping("/_fetch")
-    public ResponseEntity<DJBMonthlyBillingStatementResponse> fetch(
-            @Valid @RequestBody DJBMonthlyBillingFetchRequest request) {
+	/**
+	 * Read-only production billing-statement endpoint. The calculation section is
+	 * loaded from the immutable persisted calculation snapshot used to generate the
+	 * demand/bill; the billing-service is queried only to enrich and reconcile the
+	 * final bill details.
+	 */
+	@PostMapping("/_search")
+	public ResponseEntity<DJBMonthlyBillingStatementResponse> fetch(
+			@Valid @RequestBody DJBMonthlyBillingFetchRequest request) {
 
-        DJBMonthlyBillingStatementResponse serviceResponse = fetchService.fetch(request);
-        serviceResponse.setResponseInfo(
-                responseInfoFactory.createResponseInfoFromRequestInfo(request.getRequestInfo(), true));
+		DJBMonthlyBillingStatementResponse serviceResponse = fetchService.fetch(request);
+		serviceResponse
+				.setResponseInfo(responseInfoFactory.createResponseInfoFromRequestInfo(request.getRequestInfo(), true));
 
-        return new ResponseEntity<>(serviceResponse, HttpStatus.OK);
-    }
+		return new ResponseEntity<>(serviceResponse, HttpStatus.OK);
+	}
 }

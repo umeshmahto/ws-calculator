@@ -8,6 +8,6 @@ import lombok.Data;
 @Data
 @Builder
 public class DJBMonthlyBillingStatementResponse {
-    private ResponseInfo responseInfo;
-    private DJBMonthlyBillingStatement billingStatement;
+	private ResponseInfo responseInfo;
+	private DJBMonthlyBillingStatement billingStatement;
 }

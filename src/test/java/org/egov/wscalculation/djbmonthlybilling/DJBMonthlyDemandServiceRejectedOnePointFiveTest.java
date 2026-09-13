@@ -43,293 +43,233 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 @ExtendWith(MockitoExtension.class)
 class DJBMonthlyDemandServiceRejectedOnePointFiveTest {
 
-    @Mock
-    private DJBMonthlyBillingMasterProvider masterProvider;
+	@Mock
+	private DJBMonthlyBillingMasterProvider masterProvider;
 
-    @Mock
-    private TariffCalculationService tariffCalculationService;
+	@Mock
+	private TariffCalculationService tariffCalculationService;
 
-    @Mock
-    private ConsumptionService consumptionService;
+	@Mock
+	private ConsumptionService consumptionService;
 
-    @Mock
-    private SewerageCalculationService sewerageCalculationService;
+	@Mock
+	private SewerageCalculationService sewerageCalculationService;
 
-    @Mock
-    private RebateCalculationService rebateCalculationService;
+	@Mock
+	private RebateCalculationService rebateCalculationService;
 
-    @Mock
-    private DemandRepository demandRepository;
+	@Mock
+	private DemandRepository demandRepository;
 
-    @Mock
-    private CalculatorUtil calculatorUtil;
+	@Mock
+	private CalculatorUtil calculatorUtil;
 
-    @Mock
-    private WSCalculationUtil wsCalculationUtil;
+	@Mock
+	private WSCalculationUtil wsCalculationUtil;
 
-    @Mock
-    private WSCalculationConfiguration config;
+	@Mock
+	private WSCalculationConfiguration config;
 
-    @Mock
-    private ServiceRequestRepository serviceRequestRepository;
+	@Mock
+	private ServiceRequestRepository serviceRequestRepository;
 
-    @Mock
-    private ObjectMapper objectMapper;
+	@Mock
+	private ObjectMapper objectMapper;
 
-    @Mock
-    private WSCalculationProducer wsCalculationProducer;
+	@Mock
+	private WSCalculationProducer wsCalculationProducer;
 
-    @Mock
-    private ResidualCreditService residualCreditService;
+	@Mock
+	private ResidualCreditService residualCreditService;
 
-    @Mock
-    private ZroVerificationDao zroVerificationDao;
+	@Mock
+	private ZroVerificationDao zroVerificationDao;
 
-    @Mock
-    private WaterBillingCycleDao billingCycleDao;
+	@Mock
+	private WaterBillingCycleDao billingCycleDao;
 
-    @Mock
-    private DJBMonthlyBillingRule rule;
+	@Mock
+	private DJBMonthlyBillingRule rule;
 
-    @InjectMocks
-    private DJBMonthlyDemandService service;
+	@InjectMocks
+	private DJBMonthlyDemandService service;
 
-    private DJBMonthlyDemandService spyService;
+	private DJBMonthlyDemandService spyService;
 
-    private final RequestInfo requestInfo = new RequestInfo();
+	private final RequestInfo requestInfo = new RequestInfo();
 
-    @BeforeEach
-    void setUp() {
-        spyService = org.mockito.Mockito.spy(service);
-    }
+	@BeforeEach
+	void setUp() {
+		spyService = org.mockito.Mockito.spy(service);
+	}
 
-    @Test
-    void shouldUseHistoricalAverageForFirstRejectedOnePointFiveProvisionalCycle() {
-        WaterBillingCycle cycle = flaggedCycle();
+	@Test
+	void shouldUseHistoricalAverageForFirstRejectedOnePointFiveProvisionalCycle() {
+		WaterBillingCycle cycle = flaggedCycle();
 
-        when(masterProvider.getBillingRule(eq(requestInfo), eq(cycle.getTenantid())))
-                .thenReturn(rule);
-        when(rule.getAverageLookbackMonths()).thenReturn(12);
-        when(rule.getProvisionalMaximumCycles()).thenReturn(2);
-        when(rule.getMinimumPostAverageConsumptionKl()).thenReturn(Integer.valueOf(25));
-
-        when(consumptionService.calculateHistoricalAverage(
-                eq(cycle.getTenantid()),
-                eq(cycle.getConnectionno()),
-                eq(cycle.getBillingperiodto()),
-                eq(12)))
-                .thenReturn(new BigDecimal("18"));
+		when(masterProvider.getBillingRule(eq(requestInfo), eq(cycle.getTenantid()))).thenReturn(rule);
+		when(rule.getAverageLookbackMonths()).thenReturn(12);
+		when(rule.getProvisionalMaximumCycles()).thenReturn(2);
+		when(rule.getMinimumPostAverageConsumptionKl()).thenReturn(Integer.valueOf(25));
 
-        when(billingCycleDao.findCyclesForConnection(
-                eq(cycle.getTenantid()),
-                eq(cycle.getConnectionno()),
-                eq(cycle.getBillingperiodto()),
-                eq(24)))
-                .thenReturn(Collections.emptyList());
+		when(consumptionService.calculateHistoricalAverage(eq(cycle.getTenantid()), eq(cycle.getConnectionno()),
+				eq(cycle.getBillingperiodto()), eq(12))).thenReturn(new BigDecimal("18"));
 
-        when(billingCycleDao.update(eq(cycle))).thenReturn(1);
-
-        doReturn(DJBMonthlyDemandService.DemandResult.builder()
-                .demandCreated(true)
-                .message("test")
-                .build())
-                .when(spyService).createDemand(eq(requestInfo), eq(cycle));
+		when(billingCycleDao.findCyclesForConnection(eq(cycle.getTenantid()), eq(cycle.getConnectionno()),
+				eq(cycle.getBillingperiodto()), eq(24))).thenReturn(Collections.emptyList());
 
-        DJBMonthlyDemandService.DemandResult result =
-                spyService.createRejectedOnePointFiveFallbackDemand(requestInfo, cycle);
+		when(billingCycleDao.update(eq(cycle))).thenReturn(1);
 
-        assertEquals(new BigDecimal("18"), cycle.getAverageconsumption());
-        assertEquals(new BigDecimal("18"), cycle.getBillingconsumption());
-        assertEquals(BillingBasis.PROVISIONAL, cycle.getBillingbasis());
-        assertEquals(Integer.valueOf(1), cycle.getProvisionalcyclecount());
-        assertEquals(BillingCycleStatus.CALCULATED, cycle.getStatus());
+		doReturn(DJBMonthlyDemandService.DemandResult.builder().demandCreated(true).message("test").build())
+				.when(spyService).createDemand(eq(requestInfo), eq(cycle));
 
-        assertEquals(true, result.isDemandCreated());
-        verify(billingCycleDao).update(eq(cycle));
-    }
-
-    @Test
-    void shouldUseHistoricalAverageForSecondRejectedOnePointFiveProvisionalCycle() {
-        WaterBillingCycle cycle = flaggedCycle();
-
-        WaterBillingCycle previous =
-                estimatedCycle(BillingBasis.PROVISIONAL);
-
-        when(masterProvider.getBillingRule(eq(requestInfo), eq(cycle.getTenantid())))
-                .thenReturn(rule);
-        when(rule.getAverageLookbackMonths()).thenReturn(12);
-        when(rule.getProvisionalMaximumCycles()).thenReturn(2);
-        when(rule.getMinimumPostAverageConsumptionKl()).thenReturn(Integer.valueOf(25));
-
-        when(consumptionService.calculateHistoricalAverage(
-                eq(cycle.getTenantid()),
-                eq(cycle.getConnectionno()),
-                eq(cycle.getBillingperiodto()),
-                eq(12)))
-                .thenReturn(new BigDecimal("18"));
-
-        when(billingCycleDao.findCyclesForConnection(
-                eq(cycle.getTenantid()),
-                eq(cycle.getConnectionno()),
-                eq(cycle.getBillingperiodto()),
-                eq(24)))
-                .thenReturn(Collections.singletonList(previous));
-
-        when(billingCycleDao.update(eq(cycle))).thenReturn(1);
-
-        doReturn(DJBMonthlyDemandService.DemandResult.builder()
-                .demandCreated(true)
-                .build())
-                .when(spyService).createDemand(eq(requestInfo), eq(cycle));
-
-        spyService.createRejectedOnePointFiveFallbackDemand(requestInfo, cycle);
-
-        assertEquals(new BigDecimal("18"), cycle.getBillingconsumption());
-        assertEquals(Integer.valueOf(2), cycle.getProvisionalcyclecount());
-    }
-
-    @Test
-    void shouldApplyTwentyFiveKlFloorFromThirdRejectedOnePointFiveProvisionalCycle() {
-        WaterBillingCycle cycle = flaggedCycle();
-
-        WaterBillingCycle previous1 =
-                estimatedCycle(BillingBasis.PROVISIONAL);
-        WaterBillingCycle previous2 =
-                estimatedCycle(BillingBasis.PROVISIONAL);
-
-        when(masterProvider.getBillingRule(eq(requestInfo), eq(cycle.getTenantid())))
-                .thenReturn(rule);
-        when(rule.getAverageLookbackMonths()).thenReturn(12);
-        when(rule.getProvisionalMaximumCycles()).thenReturn(2);
-        when(rule.getMinimumPostAverageConsumptionKl()).thenReturn(Integer.valueOf(25));
-
-        when(consumptionService.calculateHistoricalAverage(
-                eq(cycle.getTenantid()),
-                eq(cycle.getConnectionno()),
-                eq(cycle.getBillingperiodto()),
-                eq(12)))
-                .thenReturn(new BigDecimal("18"));
-
-        when(billingCycleDao.findCyclesForConnection(
-                eq(cycle.getTenantid()),
-                eq(cycle.getConnectionno()),
-                eq(cycle.getBillingperiodto()),
-                eq(24)))
-                .thenReturn(Arrays.asList(previous1, previous2));
-
-        when(billingCycleDao.update(eq(cycle))).thenReturn(1);
-
-        doReturn(DJBMonthlyDemandService.DemandResult.builder()
-                .demandCreated(true)
-                .build())
-                .when(spyService).createDemand(eq(requestInfo), eq(cycle));
-
-        spyService.createRejectedOnePointFiveFallbackDemand(requestInfo, cycle);
-
-        assertEquals(new BigDecimal("25"), cycle.getBillingconsumption());
-        assertEquals(Integer.valueOf(3), cycle.getProvisionalcyclecount());
-    }
-
-    @Test
-    void shouldNotConsumeProvisionalAllowanceFromOlderAverageCycle() {
-        WaterBillingCycle cycle = flaggedCycle();
-
-        WaterBillingCycle olderAverage =
-                estimatedCycle(BillingBasis.AVERAGE);
-
-        when(masterProvider.getBillingRule(eq(requestInfo), eq(cycle.getTenantid())))
-                .thenReturn(rule);
-        when(rule.getAverageLookbackMonths()).thenReturn(12);
-        when(rule.getProvisionalMaximumCycles()).thenReturn(2);
-        when(rule.getMinimumPostAverageConsumptionKl()).thenReturn(Integer.valueOf(25));
-
-        when(consumptionService.calculateHistoricalAverage(
-                eq(cycle.getTenantid()),
-                eq(cycle.getConnectionno()),
-                eq(cycle.getBillingperiodto()),
-                eq(12)))
-                .thenReturn(new BigDecimal("18"));
-
-        when(billingCycleDao.findCyclesForConnection(
-                eq(cycle.getTenantid()),
-                eq(cycle.getConnectionno()),
-                eq(cycle.getBillingperiodto()),
-                eq(24)))
-                .thenReturn(Collections.singletonList(olderAverage));
-
-        when(billingCycleDao.update(eq(cycle))).thenReturn(1);
-
-        doReturn(DJBMonthlyDemandService.DemandResult.builder()
-                .demandCreated(true)
-                .build())
-                .when(spyService).createDemand(eq(requestInfo), eq(cycle));
-
-        spyService.createRejectedOnePointFiveFallbackDemand(requestInfo, cycle);
-
-        assertEquals(new BigDecimal("18"), cycle.getBillingconsumption());
-        assertEquals(Integer.valueOf(1), cycle.getProvisionalcyclecount());
-    }
-
-    @Test
-    void shouldRejectFallbackWhenCycleIsNotOnePointFiveFlagged() {
-        WaterBillingCycle cycle = flaggedCycle();
-        cycle.setOnepointfivexflag(Boolean.FALSE);
-
-        IllegalArgumentException exception = assertThrows(
-                IllegalArgumentException.class,
-                () -> spyService.createRejectedOnePointFiveFallbackDemand(
-                        requestInfo, cycle));
-
-        assertEquals(
-                "Rejected 1.5x fallback billing is only valid for a DJB 1.5x flagged billing cycle",
-                exception.getMessage());
-    }
-
-    @Test
-    void shouldRejectFallbackWhenHistoricalAverageIsMissing() {
-        WaterBillingCycle cycle = flaggedCycle();
-
-        when(masterProvider.getBillingRule(eq(requestInfo), eq(cycle.getTenantid())))
-                .thenReturn(rule);
-        when(rule.getAverageLookbackMonths()).thenReturn(12);
-
-        when(consumptionService.calculateHistoricalAverage(
-                eq(cycle.getTenantid()),
-                eq(cycle.getConnectionno()),
-                eq(cycle.getBillingperiodto()),
-                eq(12)))
-                .thenReturn(null);
-
-        IllegalStateException exception = assertThrows(
-                IllegalStateException.class,
-                () -> spyService.createRejectedOnePointFiveFallbackDemand(
-                        requestInfo, cycle));
-
-        assertEquals(
-                "No actual consumption history is available for rejected DJB 1.5x fallback billing",
-                exception.getMessage());
-    }
-
-    private WaterBillingCycle flaggedCycle() {
-        WaterBillingCycle cycle = new WaterBillingCycle();
-        cycle.setId("cycle-001");
-        cycle.setTenantid("dl.djb");
-        cycle.setConnectionno("WS/DJB/2026-27/000367");
-        cycle.setBillingperiodfrom(1780338600000L);
-        cycle.setBillingperiodto(1783017000000L);
-        cycle.setActualconsumption(new BigDecimal("40"));
-        cycle.setPreviousconsumption(new BigDecimal("20"));
-        cycle.setBillingconsumption(new BigDecimal("40"));
-        cycle.setOnepointfivexflag(Boolean.TRUE);
-        return cycle;
-    }
-
-    private WaterBillingCycle estimatedCycle(BillingBasis basis) {
-        WaterBillingCycle cycle = new WaterBillingCycle();
-        cycle.setId("previous-cycle");
-        cycle.setTenantid("dl.djb");
-        cycle.setConnectionno("WS/DJB/2026-27/000367");
-        cycle.setBillingbasis(basis);
-        return cycle;
-    }
+		DJBMonthlyDemandService.DemandResult result = spyService.createRejectedOnePointFiveFallbackDemand(requestInfo,
+				cycle);
+
+		assertEquals(new BigDecimal("18"), cycle.getAverageconsumption());
+		assertEquals(new BigDecimal("18"), cycle.getBillingconsumption());
+		assertEquals(BillingBasis.PROVISIONAL, cycle.getBillingbasis());
+		assertEquals(Integer.valueOf(1), cycle.getProvisionalcyclecount());
+		assertEquals(BillingCycleStatus.CALCULATED, cycle.getStatus());
+
+		assertEquals(true, result.isDemandCreated());
+		verify(billingCycleDao).update(eq(cycle));
+	}
+
+	@Test
+	void shouldUseHistoricalAverageForSecondRejectedOnePointFiveProvisionalCycle() {
+		WaterBillingCycle cycle = flaggedCycle();
+
+		WaterBillingCycle previous = estimatedCycle(BillingBasis.PROVISIONAL);
+
+		when(masterProvider.getBillingRule(eq(requestInfo), eq(cycle.getTenantid()))).thenReturn(rule);
+		when(rule.getAverageLookbackMonths()).thenReturn(12);
+		when(rule.getProvisionalMaximumCycles()).thenReturn(2);
+		when(rule.getMinimumPostAverageConsumptionKl()).thenReturn(Integer.valueOf(25));
+
+		when(consumptionService.calculateHistoricalAverage(eq(cycle.getTenantid()), eq(cycle.getConnectionno()),
+				eq(cycle.getBillingperiodto()), eq(12))).thenReturn(new BigDecimal("18"));
+
+		when(billingCycleDao.findCyclesForConnection(eq(cycle.getTenantid()), eq(cycle.getConnectionno()),
+				eq(cycle.getBillingperiodto()), eq(24))).thenReturn(Collections.singletonList(previous));
+
+		when(billingCycleDao.update(eq(cycle))).thenReturn(1);
+
+		doReturn(DJBMonthlyDemandService.DemandResult.builder().demandCreated(true).build()).when(spyService)
+				.createDemand(eq(requestInfo), eq(cycle));
+
+		spyService.createRejectedOnePointFiveFallbackDemand(requestInfo, cycle);
+
+		assertEquals(new BigDecimal("18"), cycle.getBillingconsumption());
+		assertEquals(Integer.valueOf(2), cycle.getProvisionalcyclecount());
+	}
+
+	@Test
+	void shouldApplyTwentyFiveKlFloorFromThirdRejectedOnePointFiveProvisionalCycle() {
+		WaterBillingCycle cycle = flaggedCycle();
+
+		WaterBillingCycle previous1 = estimatedCycle(BillingBasis.PROVISIONAL);
+		WaterBillingCycle previous2 = estimatedCycle(BillingBasis.PROVISIONAL);
+
+		when(masterProvider.getBillingRule(eq(requestInfo), eq(cycle.getTenantid()))).thenReturn(rule);
+		when(rule.getAverageLookbackMonths()).thenReturn(12);
+		when(rule.getProvisionalMaximumCycles()).thenReturn(2);
+		when(rule.getMinimumPostAverageConsumptionKl()).thenReturn(Integer.valueOf(25));
+
+		when(consumptionService.calculateHistoricalAverage(eq(cycle.getTenantid()), eq(cycle.getConnectionno()),
+				eq(cycle.getBillingperiodto()), eq(12))).thenReturn(new BigDecimal("18"));
+
+		when(billingCycleDao.findCyclesForConnection(eq(cycle.getTenantid()), eq(cycle.getConnectionno()),
+				eq(cycle.getBillingperiodto()), eq(24))).thenReturn(Arrays.asList(previous1, previous2));
+
+		when(billingCycleDao.update(eq(cycle))).thenReturn(1);
+
+		doReturn(DJBMonthlyDemandService.DemandResult.builder().demandCreated(true).build()).when(spyService)
+				.createDemand(eq(requestInfo), eq(cycle));
+
+		spyService.createRejectedOnePointFiveFallbackDemand(requestInfo, cycle);
+
+		assertEquals(new BigDecimal("25"), cycle.getBillingconsumption());
+		assertEquals(Integer.valueOf(3), cycle.getProvisionalcyclecount());
+	}
+
+	@Test
+	void shouldNotConsumeProvisionalAllowanceFromOlderAverageCycle() {
+		WaterBillingCycle cycle = flaggedCycle();
+
+		WaterBillingCycle olderAverage = estimatedCycle(BillingBasis.AVERAGE);
+
+		when(masterProvider.getBillingRule(eq(requestInfo), eq(cycle.getTenantid()))).thenReturn(rule);
+		when(rule.getAverageLookbackMonths()).thenReturn(12);
+		when(rule.getProvisionalMaximumCycles()).thenReturn(2);
+		when(rule.getMinimumPostAverageConsumptionKl()).thenReturn(Integer.valueOf(25));
+
+		when(consumptionService.calculateHistoricalAverage(eq(cycle.getTenantid()), eq(cycle.getConnectionno()),
+				eq(cycle.getBillingperiodto()), eq(12))).thenReturn(new BigDecimal("18"));
+
+		when(billingCycleDao.findCyclesForConnection(eq(cycle.getTenantid()), eq(cycle.getConnectionno()),
+				eq(cycle.getBillingperiodto()), eq(24))).thenReturn(Collections.singletonList(olderAverage));
+
+		when(billingCycleDao.update(eq(cycle))).thenReturn(1);
+
+		doReturn(DJBMonthlyDemandService.DemandResult.builder().demandCreated(true).build()).when(spyService)
+				.createDemand(eq(requestInfo), eq(cycle));
+
+		spyService.createRejectedOnePointFiveFallbackDemand(requestInfo, cycle);
+
+		assertEquals(new BigDecimal("18"), cycle.getBillingconsumption());
+		assertEquals(Integer.valueOf(1), cycle.getProvisionalcyclecount());
+	}
+
+	@Test
+	void shouldRejectFallbackWhenCycleIsNotOnePointFiveFlagged() {
+		WaterBillingCycle cycle = flaggedCycle();
+		cycle.setOnepointfivexflag(Boolean.FALSE);
+
+		IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+				() -> spyService.createRejectedOnePointFiveFallbackDemand(requestInfo, cycle));
+
+		assertEquals("Rejected 1.5x fallback billing is only valid for a DJB 1.5x flagged billing cycle",
+				exception.getMessage());
+	}
+
+	@Test
+	void shouldRejectFallbackWhenHistoricalAverageIsMissing() {
+		WaterBillingCycle cycle = flaggedCycle();
+
+		when(masterProvider.getBillingRule(eq(requestInfo), eq(cycle.getTenantid()))).thenReturn(rule);
+		when(rule.getAverageLookbackMonths()).thenReturn(12);
+
+		when(consumptionService.calculateHistoricalAverage(eq(cycle.getTenantid()), eq(cycle.getConnectionno()),
+				eq(cycle.getBillingperiodto()), eq(12))).thenReturn(null);
+
+		IllegalStateException exception = assertThrows(IllegalStateException.class,
+				() -> spyService.createRejectedOnePointFiveFallbackDemand(requestInfo, cycle));
+
+		assertEquals("No actual consumption history is available for rejected DJB 1.5x fallback billing",
+				exception.getMessage());
+	}
+
+	private WaterBillingCycle flaggedCycle() {
+		WaterBillingCycle cycle = new WaterBillingCycle();
+		cycle.setId("cycle-001");
+		cycle.setTenantid("dl.djb");
+		cycle.setConnectionno("WS/DJB/2026-27/000367");
+		cycle.setBillingperiodfrom(1780338600000L);
+		cycle.setBillingperiodto(1783017000000L);
+		cycle.setActualconsumption(new BigDecimal("40"));
+		cycle.setPreviousconsumption(new BigDecimal("20"));
+		cycle.setBillingconsumption(new BigDecimal("40"));
+		cycle.setOnepointfivexflag(Boolean.TRUE);
+		return cycle;
+	}
+
+	private WaterBillingCycle estimatedCycle(BillingBasis basis) {
+		WaterBillingCycle cycle = new WaterBillingCycle();
+		cycle.setId("previous-cycle");
+		cycle.setTenantid("dl.djb");
+		cycle.setConnectionno("WS/DJB/2026-27/000367");
+		cycle.setBillingbasis(basis);
+		return cycle;
+	}
 }

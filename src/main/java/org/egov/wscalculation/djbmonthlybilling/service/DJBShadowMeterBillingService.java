@@ -101,11 +101,17 @@ public class DJBShadowMeterBillingService {
 		DJBReadingQualityCode rqc = masterProvider.findReadingQualityCode(requestInfo, tenantId,
 				reading.getReadingQualityCode());
 
-		long from = Math.min(reading.getLastReadingDate(), reading.getCurrentReadingDate());
-		long to = Math.max(reading.getLastReadingDate(), reading.getCurrentReadingDate());
+		validateMeterReadingOrder(reading);
+
+		long from = reading.getLastReadingDate();
+		long to = reading.getCurrentReadingDate();
 
 		WaterBillingCycle cycle = billingCycleDao.findByConnectionAndPeriod(tenantId, connectionNo, from, to);
 		boolean existing = cycle != null;
+
+		if (!existing) {
+			validateBillingPeriodContinuity(tenantId, connectionNo, from, to);
+		}
 
 		if (existing && (StringUtils.hasText(cycle.getBillid())
 				|| BillingCycleStatus.BILL_GENERATED.equals(cycle.getStatus()))) {
@@ -198,23 +204,17 @@ public class DJBShadowMeterBillingService {
 		}
 
 		/*
-		 * A flagged domestic 1.5x cycle must not create a correction plan or demand
-		 * before ZRO approves it. This is the key separation between the verification
-		 * decision and the billing decision.
+		 * A flagged 1.5x cycle must not create an automatic correction plan before ZRO
+		 * approves it. We still call the demand service: it owns the ZRO gate and will
+		 * persist the auditable ZRO-pending calculation snapshot without creating demand.
 		 */
-		if (Boolean.TRUE.equals(cycle.getOnepointfivexflag())
+		boolean zroDecisionPending = Boolean.TRUE.equals(cycle.getOnepointfivexflag())
 				&& !org.egov.wscalculation.djbmonthlybilling.model.enums.ZroStatus.APPROVED
-						.equals(cycle.getZrostatus())) {
-			if (cycle.getStatus() != BillingCycleStatus.CALCULATED) {
-				cycle.setStatus(BillingCycleStatus.CALCULATED);
-				persistCycleUpdate(cycle);
-			}
-			return;
-		}
+						.equals(cycle.getZrostatus());
 
 		CorrectionPlanResult correction = null;
 
-		if (BillingBasis.ACTUAL.equals(cycle.getBillingbasis())) {
+		if (BillingBasis.ACTUAL.equals(cycle.getBillingbasis()) && !zroDecisionPending) {
 			correction = correctionService.processAutomaticCorrection(requestInfo, cycle.getTenantid(), cycle,
 					actor(requestInfo), System.currentTimeMillis());
 
@@ -321,6 +321,49 @@ public class DJBShadowMeterBillingService {
 
 	private void persistCycleUpdate(WaterBillingCycle cycle) {
 		transactionTemplate.executeWithoutResult(status -> billingCycleDao.update(cycle));
+	}
+
+	private void validateBillingPeriodContinuity(String tenantId, String connectionNo, long from, long to) {
+		WaterBillingCycle latest = billingCycleDao.findLatestByConnection(tenantId, connectionNo);
+		if (latest == null) {
+			return;
+		}
+
+		Long latestFrom = latest.getBillingperiodfrom();
+		Long latestTo = latest.getBillingperiodto();
+		if (latestFrom == null || latestTo == null) {
+			throw new IllegalStateException(
+					"Existing billing cycle has invalid billing period and cannot accept a new monthly cycle: "
+							+ latest.getId());
+		}
+
+		if (from < latestTo) {
+			throw new IllegalStateException(
+					"Billing period overlaps the latest billing cycle " + latest.getId()
+							+ ". Existing period: " + latestFrom + "-" + latestTo
+							+ ", requested period: " + from + "-" + to);
+		}
+
+		if (from > latestTo) {
+			throw new IllegalStateException(
+					"Billing period has a gap after the latest billing cycle " + latest.getId()
+							+ ". Existing period ends at " + latestTo + " but requested period starts at " + from);
+		}
+	}
+
+	private void validateMeterReadingOrder(MeterReading reading) {
+		if (reading.getLastReadingDate() == null || reading.getCurrentReadingDate() == null
+				|| reading.getLastReading() == null || reading.getCurrentReading() == null) {
+			throw new IllegalArgumentException("Last/current reading and dates are required");
+		}
+		if (reading.getCurrentReadingDate() < reading.getLastReadingDate()) {
+			throw new IllegalArgumentException(
+					"Current reading date cannot be earlier than last reading date");
+		}
+		if (reading.getCurrentReading() < reading.getLastReading()) {
+			throw new IllegalArgumentException(
+					"Current meter reading cannot be less than last meter reading");
+		}
 	}
 
 	/**

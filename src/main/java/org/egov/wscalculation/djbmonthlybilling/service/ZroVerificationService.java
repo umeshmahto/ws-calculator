@@ -21,13 +21,16 @@ public class ZroVerificationService {
 	private final ZroVerificationDao zroVerificationDao;
 	private final DJBMonthlyDemandService demandService;
 	private final DJBShadowMeterBillingService djbShadowMeterBillingService;
+	private final DJBMonthlyBillingCalculationSnapshotService calculationSnapshotService;
 
 	public ZroVerificationService(WaterBillingCycleDao billingCycleDao, ZroVerificationDao zroVerificationDao,
-			DJBMonthlyDemandService demandService, DJBShadowMeterBillingService djbShadowMeterBillingService) {
+			DJBMonthlyDemandService demandService, DJBShadowMeterBillingService djbShadowMeterBillingService,
+			DJBMonthlyBillingCalculationSnapshotService calculationSnapshotService) {
 		this.billingCycleDao = billingCycleDao;
 		this.zroVerificationDao = zroVerificationDao;
 		this.demandService = demandService;
 		this.djbShadowMeterBillingService = djbShadowMeterBillingService;
+		this.calculationSnapshotService = calculationSnapshotService;
 	}
 
 	public ZroVerificationResult update(RequestInfo requestInfo, String billingCycleId, String action, String remarks) {
@@ -165,6 +168,7 @@ public class ZroVerificationService {
 				throw new IllegalStateException(
 						"Failed to persist billing-cycle ZRO REJECTED status for " + billingCycleId);
 			}
+			calculationSnapshotService.updateStatus(tenantId, cycle.getCalculationid(), "ZRO_REJECTED");
 
 			DJBMonthlyDemandService.DemandResult demandResult = demandService
 					.createRejectedOnePointFiveFallbackDemand(requestInfo, cycle);
@@ -215,6 +219,7 @@ public class ZroVerificationService {
 			throw new IllegalStateException(
 					"Failed to persist billing-cycle ZRO APPROVED status for " + billingCycleId);
 		}
+		calculationSnapshotService.updateStatus(tenantId, cycle.getCalculationid(), "ZRO_APPROVED");
 
 		/*
 		 * APPROVE is now the explicit hand-off into the normal ACTUAL billing path.

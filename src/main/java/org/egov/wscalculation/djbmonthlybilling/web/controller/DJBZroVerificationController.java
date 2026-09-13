@@ -15,7 +15,7 @@ import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping("/djbZroVerification")
+@RequestMapping("/zro-verification")
 public class DJBZroVerificationController {
 
 	private final ResponseInfoFactory responseInfoFactory;

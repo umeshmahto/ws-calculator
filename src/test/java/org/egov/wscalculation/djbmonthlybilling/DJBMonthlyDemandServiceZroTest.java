@@ -24,6 +24,7 @@ import org.egov.wscalculation.djbmonthlybilling.repository.WaterBillingCycleDao;
 import org.egov.wscalculation.djbmonthlybilling.repository.ZroVerificationDao;
 import org.egov.wscalculation.djbmonthlybilling.service.ConsumptionService;
 import org.egov.wscalculation.djbmonthlybilling.service.DJBMonthlyDemandService;
+import org.egov.wscalculation.djbmonthlybilling.service.DJBMonthlyBillingCalculationSnapshotService;
 import org.egov.wscalculation.djbmonthlybilling.service.RebateCalculationService;
 import org.egov.wscalculation.djbmonthlybilling.service.ResidualCreditService;
 import org.egov.wscalculation.djbmonthlybilling.service.SewerageCalculationService;
@@ -92,6 +93,9 @@ class DJBMonthlyDemandServiceZroTest {
 	@Mock
 	private WaterBillingCycleDao billingCycleDao;
 
+	@Mock
+	private DJBMonthlyBillingCalculationSnapshotService calculationSnapshotService;
+
 	@InjectMocks
 	private DJBMonthlyDemandService service;
 
@@ -125,6 +129,8 @@ class DJBMonthlyDemandServiceZroTest {
 		when(zroVerificationDao.findByBillingCycle(eq(tenantId), eq(cycle.getId()))).thenReturn(null);
 
 		when(billingCycleDao.update(eq(cycle))).thenReturn(1);
+		when(calculationSnapshotService.persistPendingZro(any(), eq(cycle), eq(connection), eq(property), any()))
+				.thenReturn("calc-zro-001");
 
 		DJBMonthlyDemandService.DemandResult result = service.createDemand(requestInfo, cycle);
 
@@ -136,7 +142,9 @@ class DJBMonthlyDemandServiceZroTest {
 
 		assertEquals(ZroStatus.PENDING, cycle.getZrostatus());
 		assertEquals(BillingCycleStatus.CALCULATED, cycle.getStatus());
+		assertEquals("calc-zro-001", cycle.getCalculationid());
 
+		verify(calculationSnapshotService).persistPendingZro(any(), eq(cycle), eq(connection), eq(property), any());
 		verify(zroVerificationDao).save(any());
 		verify(billingCycleDao).update(eq(cycle));
 

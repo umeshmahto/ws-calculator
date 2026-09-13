@@ -151,6 +151,7 @@ public class DJBMonthlyDemandService {
 				WaterConnectionRequest.builder().requestInfo(requestInfo).waterConnection(connection).build());
 
 		String category = resolveTariffCategory(connection, property);
+		DJBMonthlyBillingRule billingRule = masterProvider.getBillingRule(requestInfo, tenantId);
 
 		/*
 		 * DJB 1.5x/ZRO is applicable only for domestic connections. Use the same
@@ -178,6 +179,10 @@ public class DJBMonthlyDemandService {
 				cycle.setLastmodifiedtime(System.currentTimeMillis());
 
 				createPendingZroVerification(cycle, actorForDemand(requestInfo));
+
+				String calculationId = calculationSnapshotService.persistPendingZro(
+						requestInfo, cycle, connection, property, billingRule);
+				cycle.setCalculationid(calculationId);
 
 				if (billingCycleDao.update(cycle) != 1) {
 					throw new IllegalStateException(
@@ -263,10 +268,6 @@ public class DJBMonthlyDemandService {
 				.setScale(MONEY_SCALE, RoundingMode.HALF_UP);
 
 		try {
-			DJBMonthlyBillingRule billingRule = null;
-			if (BillingBasis.AVERAGE.equals(cycle.getBillingbasis()) || BillingBasis.PROVISIONAL.equals(cycle.getBillingbasis())) {
-				billingRule = masterProvider.getBillingRule(requestInfo, tenantId);
-			}
 			String calculationId = calculationSnapshotService.persist(requestInfo, cycle, connection, property,
 					water, sewerage, rebate, billingRule, appliedPaidAdjustment, residualPaidCredit, carryForwardCreditApplied,
 					creditReservation.getAllocationIds(), netAmount);
@@ -376,6 +377,17 @@ public class DJBMonthlyDemandService {
 		}
 
 		Demand created = response.get(0);
+
+		/* Persist the demand reference before bill generation so a bill failure can be retried safely. */
+		cycle.setDemandid(created.getId());
+		cycle.setStatus(BillingCycleStatus.DEMAND_CREATED);
+		cycle.setLastmodifiedby(actorForDemand(requestInfo));
+		cycle.setLastmodifiedtime(System.currentTimeMillis());
+		if (billingCycleDao.update(cycle) != 1) {
+			safeUpdateSnapshotStatus(tenantId, cycle.getCalculationid(), "DEMAND_PERSIST_FAILED");
+			throw new IllegalStateException("Failed to persist DJB demand reference for billing cycle " + cycle.getId());
+		}
+		safeUpdateSnapshotStatus(tenantId, cycle.getCalculationid(), "DEMAND_CREATED");
 
 		if (creditReservation.isNewReservation()) {
 			residualCreditService.confirmReservations(tenantId, cycle.getId(), created.getId(),
