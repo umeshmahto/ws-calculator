@@ -190,4 +190,17 @@ public class DJBMonthlyBillingQueryBuilder {
                "AND billingperiodto < ? " +
                "ORDER BY billingperiodto DESC LIMIT 1";
     }
+    public String findBillingCalculationById() {
+        return "SELECT * FROM eg_ws_billingcalculation WHERE tenantid = ? AND id = ?";
+    }
+
+    public String findBillingCalculationByCycle() {
+        return "SELECT * FROM eg_ws_billingcalculation WHERE tenantid = ? AND billingcycleid = ? ORDER BY calculatedtime DESC LIMIT 1";
+    }
+
+    public String insertBillingCalculation() {
+        return "INSERT INTO eg_ws_billingcalculation (id, tenantid, billingcycleid, connectionno, engineversion, status, calculatedtime, calculatedby, snapshotjson) " +
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)";
+    }
+
 }

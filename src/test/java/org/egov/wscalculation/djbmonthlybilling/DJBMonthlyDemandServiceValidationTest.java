@@ -14,6 +14,7 @@ import org.egov.wscalculation.djbmonthlybilling.model.enums.CorrectionStatus;
 import org.egov.wscalculation.djbmonthlybilling.repository.WaterBillingCycleDao;
 import org.egov.wscalculation.djbmonthlybilling.repository.ZroVerificationDao;
 import org.egov.wscalculation.djbmonthlybilling.service.ConsumptionService;
+import org.egov.wscalculation.djbmonthlybilling.service.DJBMonthlyBillingCalculationSnapshotService;
 import org.egov.wscalculation.djbmonthlybilling.service.DJBMonthlyDemandService;
 import org.egov.wscalculation.djbmonthlybilling.service.DJBMonthlyDemandService.DemandResult;
 import org.egov.wscalculation.djbmonthlybilling.service.RebateCalculationService;
@@ -48,6 +49,7 @@ class DJBMonthlyDemandServiceValidationTest {
 	private ResidualCreditService residualCreditService;
 	private ZroVerificationDao zroVerificationDao;
 	private WaterBillingCycleDao billingCycleDao;
+	private DJBMonthlyBillingCalculationSnapshotService calculationSnapshotService;
 
 	private DJBMonthlyDemandService service;
 
@@ -68,11 +70,12 @@ class DJBMonthlyDemandServiceValidationTest {
 		residualCreditService = mock(ResidualCreditService.class);
 		zroVerificationDao = mock(ZroVerificationDao.class);
 		billingCycleDao = mock(WaterBillingCycleDao.class);
+		calculationSnapshotService = mock(DJBMonthlyBillingCalculationSnapshotService.class);
 
 		service = new DJBMonthlyDemandService(masterProvider, tariffCalculationService, consumptionService,
 				sewerageCalculationService, rebateCalculationService, demandRepository, calculatorUtil,
 				wsCalculationUtil, config, serviceRequestRepository, objectMapper, wsCalculationProducer,
-				residualCreditService, zroVerificationDao, billingCycleDao);
+				residualCreditService, zroVerificationDao, billingCycleDao, calculationSnapshotService);
 	}
 
 	@Test
@@ -83,7 +86,7 @@ class DJBMonthlyDemandServiceValidationTest {
 		assertEquals("Billing cycle is required", ex.getMessage());
 		verifyNoInteractions(masterProvider, tariffCalculationService, consumptionService, sewerageCalculationService,
 				rebateCalculationService, demandRepository, calculatorUtil, wsCalculationUtil, config,
-				serviceRequestRepository, residualCreditService, zroVerificationDao, billingCycleDao);
+				serviceRequestRepository, residualCreditService, zroVerificationDao, billingCycleDao, calculationSnapshotService);
 	}
 
 	@Test
@@ -97,7 +100,7 @@ class DJBMonthlyDemandServiceValidationTest {
 		assertEquals("Billing cycle tenant and connection are required", ex.getMessage());
 		verifyNoInteractions(masterProvider, tariffCalculationService, consumptionService, sewerageCalculationService,
 				rebateCalculationService, demandRepository, calculatorUtil, wsCalculationUtil, config,
-				serviceRequestRepository, residualCreditService, zroVerificationDao, billingCycleDao);
+				serviceRequestRepository, residualCreditService, zroVerificationDao, billingCycleDao, calculationSnapshotService);
 	}
 
 	@Test
@@ -111,7 +114,7 @@ class DJBMonthlyDemandServiceValidationTest {
 		assertEquals("Billing cycle tenant and connection are required", ex.getMessage());
 		verifyNoInteractions(masterProvider, tariffCalculationService, consumptionService, sewerageCalculationService,
 				rebateCalculationService, demandRepository, calculatorUtil, wsCalculationUtil, config,
-				serviceRequestRepository, residualCreditService, zroVerificationDao, billingCycleDao);
+				serviceRequestRepository, residualCreditService, zroVerificationDao, billingCycleDao, calculationSnapshotService);
 	}
 
 	@Test
@@ -125,7 +128,7 @@ class DJBMonthlyDemandServiceValidationTest {
 		assertEquals("Billing period is required", ex.getMessage());
 		verifyNoInteractions(masterProvider, tariffCalculationService, consumptionService, sewerageCalculationService,
 				rebateCalculationService, demandRepository, calculatorUtil, wsCalculationUtil, config,
-				serviceRequestRepository, residualCreditService, zroVerificationDao, billingCycleDao);
+				serviceRequestRepository, residualCreditService, zroVerificationDao, billingCycleDao, calculationSnapshotService);
 	}
 
 	@Test

@@ -1,4 +1,4 @@
 -------------------------------------------------------------------------------
 Test set: org.egov.wscalculation.djbmonthlybilling.DJBMonthlyDemandServiceBillFetchTest
 -------------------------------------------------------------------------------
-Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.041 s - in org.egov.wscalculation.djbmonthlybilling.DJBMonthlyDemandServiceBillFetchTest
+Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.43 s - in org.egov.wscalculation.djbmonthlybilling.DJBMonthlyDemandServiceBillFetchTest

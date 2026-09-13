@@ -70,6 +70,7 @@ public class DJBMonthlyDemandService {
 	private final ResidualCreditService residualCreditService;
 	private final ZroVerificationDao zroVerificationDao;
 	private final WaterBillingCycleDao billingCycleDao;
+	private final DJBMonthlyBillingCalculationSnapshotService calculationSnapshotService;
 
 	public DJBMonthlyDemandService(DJBMonthlyBillingMasterProvider masterProvider,
 			TariffCalculationService tariffCalculationService, ConsumptionService consumptionService, SewerageCalculationService sewerageCalculationService,
@@ -77,7 +78,8 @@ public class DJBMonthlyDemandService {
 			CalculatorUtil calculatorUtil, WSCalculationUtil wsCalculationUtil, WSCalculationConfiguration config,
 			ServiceRequestRepository serviceRequestRepository, ObjectMapper objectMapper,
 			WSCalculationProducer wsCalculationProducer, ResidualCreditService residualCreditService,
-			ZroVerificationDao zroVerificationDao, WaterBillingCycleDao billingCycleDao) {
+			ZroVerificationDao zroVerificationDao, WaterBillingCycleDao billingCycleDao,
+			DJBMonthlyBillingCalculationSnapshotService calculationSnapshotService) {
 
 		this.masterProvider = masterProvider;
 		this.tariffCalculationService = tariffCalculationService;
@@ -94,6 +96,7 @@ public class DJBMonthlyDemandService {
 		this.residualCreditService = residualCreditService;
 		this.zroVerificationDao = zroVerificationDao;
 		this.billingCycleDao = billingCycleDao;
+		this.calculationSnapshotService = calculationSnapshotService;
 	}
 
 	/**
@@ -259,6 +262,24 @@ public class DJBMonthlyDemandService {
 		BigDecimal netAmount = baseNetAmount.subtract(appliedPaidAdjustment).subtract(carryForwardCreditApplied)
 				.setScale(MONEY_SCALE, RoundingMode.HALF_UP);
 
+		try {
+			String calculationId = calculationSnapshotService.persist(requestInfo, cycle, connection, property,
+					water, sewerage, rebate, appliedPaidAdjustment, residualPaidCredit, carryForwardCreditApplied,
+					creditReservation.getAllocationIds(), netAmount);
+			cycle.setCalculationid(calculationId);
+			cycle.setLastmodifiedby(actorForDemand(requestInfo));
+			cycle.setLastmodifiedtime(System.currentTimeMillis());
+			if (billingCycleDao.update(cycle) != 1) {
+				throw new IllegalStateException("Failed to persist DJB calculation snapshot reference for " + cycle.getId());
+			}
+		} catch (RuntimeException ex) {
+			if (creditReservation.isNewReservation()) {
+				residualCreditService.releaseReservations(tenantId, cycle.getId(), actorForDemand(requestInfo),
+						System.currentTimeMillis());
+			}
+			throw ex;
+		}
+
 		List<DemandDetail> demandDetails = new java.util.ArrayList<>();
 
 		/*
@@ -367,6 +388,15 @@ public class DJBMonthlyDemandService {
 			billId = fetchAndGetBillId(requestInfo, created);
 			residualCreditService.attachBillId(tenantId, cycle.getId(), billId, actorForDemand(requestInfo),
 					System.currentTimeMillis());
+		}
+
+		cycle.setDemandid(created.getId());
+		cycle.setBillid(billId);
+		cycle.setStatus(StringUtils.hasText(billId) ? BillingCycleStatus.BILL_GENERATED : BillingCycleStatus.DEMAND_CREATED);
+		cycle.setLastmodifiedby(actorForDemand(requestInfo));
+		cycle.setLastmodifiedtime(System.currentTimeMillis());
+		if (billingCycleDao.update(cycle) != 1) {
+			throw new IllegalStateException("Failed to persist DJB billing cycle final state for " + cycle.getId());
 		}
 
 		return DemandResult.builder().demandCreated(true).zroRequired(false).demand(created).billId(billId)
