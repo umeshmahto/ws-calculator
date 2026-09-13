@@ -36,6 +36,7 @@ org/egov/wscalculation/web/models/DueVerification.class
 org/egov/wscalculation/web/models/MeterConnectionRequest$MeterConnectionRequestBuilder.class
 org/egov/wscalculation/service/DemandService.class
 org/egov/wscalculation/service/EstimationService$5.class
+org/egov/wscalculation/service/WSCalculationServiceImpl$1.class
 org/egov/wscalculation/web/models/Address.class
 org/egov/wscalculation/web/models/MigrationCount.class
 org/egov/wscalculation/web/models/DemandNotificationObj$DemandNotificationObjBuilder.class
@@ -162,6 +163,7 @@ org/egov/wscalculation/web/models/Event$EventBuilder.class
 org/egov/wscalculation/djbmonthlybilling/service/dto/CorrectionPlan.class
 org/egov/wscalculation/web/models/Unit$UnitBuilder.class
 org/egov/wscalculation/web/models/idgen/IdGenerationResponse$IdGenerationResponseBuilder.class
+org/egov/wscalculation/djbmonthlybilling/service/SewerageCalculationService$1.class
 org/egov/wscalculation/helper/UsageCodeResolver.class
 org/egov/wscalculation/web/models/CalculationReq.class
 org/egov/wscalculation/web/models/Demand$StatusEnum.class
