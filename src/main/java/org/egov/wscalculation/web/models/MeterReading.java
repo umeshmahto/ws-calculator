@@ -117,6 +117,9 @@ public class MeterReading {
 	@SafeHtml
 	@JsonProperty("tenantId")
 	private String tenantId = null;
+
+	@JsonProperty("billingCycleId")
+	private String billingCycleId = null;
 	
 	@SafeHtml
 	@JsonProperty("status")
@@ -365,6 +368,20 @@ public class MeterReading {
 		this.tenantId = tenantId;
 	}
 
+	@ApiModelProperty(readOnly = true, value = "DJB monthly billing cycle id created for this meter reading")
+	public String getBillingCycleId() {
+		return billingCycleId;
+	}
+
+	public void setBillingCycleId(String billingCycleId) {
+		this.billingCycleId = billingCycleId;
+	}
+
+	public MeterReading billingCycleId(String billingCycleId) {
+		this.billingCycleId = billingCycleId;
+		return this;
+	}
+
 	@Override
 	public boolean equals(java.lang.Object o) {
 		if (this == o) {
@@ -382,13 +399,14 @@ public class MeterReading {
 				&& Objects.equals(this.currentReading, meterReading.currentReading)
 				&& Objects.equals(this.currentReadingDate, meterReading.currentReadingDate)
 				&& Objects.equals(this.consumption, meterReading.consumption)
-				&& Objects.equals(this.tenantId, meterReading.tenantId);
+				&& Objects.equals(this.tenantId, meterReading.tenantId)
+				&& Objects.equals(this.billingCycleId, meterReading.billingCycleId);
 	}
 
 	@Override
 	public int hashCode() {
 		return Objects.hash(id, billingPeriod, meterStatus, lastReading, lastReadingDate, currentReading,
-				currentReadingDate, tenantId);
+				currentReadingDate, tenantId, billingCycleId);
 	}
 
 	@Override
@@ -405,6 +423,7 @@ public class MeterReading {
 		sb.append("    currentReadingDate: ").append(toIndentedString(currentReadingDate)).append("\n");
 		sb.append("    consumption: ").append(toIndentedString(consumption)).append("\n");
 		sb.append("	   tenantId: ").append(toIndentedString(tenantId)).append("\n");
+		sb.append("    billingCycleId: ").append(toIndentedString(billingCycleId)).append("\n");
 		sb.append("}");
 		return sb.toString();
 	}

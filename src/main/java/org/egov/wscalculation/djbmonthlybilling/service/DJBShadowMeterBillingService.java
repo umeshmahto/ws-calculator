@@ -85,7 +85,7 @@ public class DJBShadowMeterBillingService {
 		}
 	}
 
-	public void processDjbBilling(MeterReading reading, RequestInfo requestInfo) {
+	public WaterBillingCycle processDjbBilling(MeterReading reading, RequestInfo requestInfo) {
 
 		String tenantId = reading.getTenantId();
 		String connectionNo = reading.getConnectionNo();
@@ -182,6 +182,7 @@ public class DJBShadowMeterBillingService {
 		});
 
 		processCalculatedCycleAfterDecision(requestInfo, cycle);
+		return cycle;
 	}
 
 	/**

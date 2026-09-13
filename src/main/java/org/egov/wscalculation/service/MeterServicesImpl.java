@@ -73,7 +73,13 @@ public class MeterServicesImpl implements MeterService {
 		if (meterConnectionRequest.getMeterReading().getGenerateDemand()) {
 			if ("dl.djb".equalsIgnoreCase(meterConnectionRequest.getMeterReading().getTenantId())) {
 
-				djbShadowMeterBillingService.processDjbBilling(meterConnectionRequest.getMeterReading(), meterConnectionRequest.getRequestInfo());
+				org.egov.wscalculation.djbmonthlybilling.model.WaterBillingCycle billingCycle =
+						djbShadowMeterBillingService.processDjbBilling(
+								meterConnectionRequest.getMeterReading(),
+								meterConnectionRequest.getRequestInfo());
+				if (billingCycle != null) {
+					meterConnectionRequest.getMeterReading().setBillingCycleId(billingCycle.getId());
+				}
 			} else {
 				generateDemandForMeterReading(meterReadingsList, meterConnectionRequest.getRequestInfo());
 			}
