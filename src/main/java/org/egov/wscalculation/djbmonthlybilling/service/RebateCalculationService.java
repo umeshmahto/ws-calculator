@@ -24,8 +24,10 @@ public class RebateCalculationService {
 	/**
 	 * Calculates the currently configured DJB monthly rebates.
 	 *
-	 * Supported by this step: 1. FREE_WATER_20KL 2. RWH rebates (10% / 15% based on
-	 * configured master conditions)
+	 * Supported rules:
+	 * - FREE_WATER_20KL
+	 * - RWH_10 / RWH_WATER_RECYCLING_15 (highest applicable rate only)
+	 * - DJB_EMPLOYEE_50
 	 *
 	 * The service does not modify demand/bill records.
 	 */
@@ -39,6 +41,7 @@ public class RebateCalculationService {
 
 		addFreeWaterRebate(context, rebates, items);
 		addRwhRebate(context, rebates, items);
+		addDjbEmployeeRebate(context, rebates, items);
 
 		BigDecimal total = BigDecimal.ZERO;
 
@@ -126,10 +129,55 @@ public class RebateCalculationService {
 				.explanation(selected.getRate() + "% RWH rebate applied on total bill").build());
 	}
 
+	private void addDjbEmployeeRebate(RebateCalculationContext context, List<DJBMonthlyRebate> rebates,
+			List<RebateItem> items) {
+
+		DJBMonthlyRebate rule = findByCode(rebates, "DJB_EMPLOYEE_50");
+		if (rule == null || !Boolean.TRUE.equals(rule.getActive()) || rule.getRate() == null) {
+			return;
+		}
+
+		if (!context.isDjbEmployeeEligible()) {
+			return;
+		}
+
+		if (rule.getEligibleConnectionType() != null
+				&& !matches(context.getConnectionType(), rule.getEligibleConnectionType())) {
+			return;
+		}
+
+		Integer maxConnections = rule.getMaxEligibleConnections();
+		Integer actualConnections = context.getEligibleConnectionCount();
+		if (maxConnections != null && (actualConnections == null || actualConnections < 1
+				|| actualConnections > maxConnections)) {
+			return;
+		}
+
+		BigDecimal baseAmount = context.getTotalBillBeforeRebate();
+		if (baseAmount == null || baseAmount.signum() <= 0) {
+			return;
+		}
+
+		BigDecimal rebateAmount = percentage(baseAmount, rule.getRate());
+		items.add(RebateItem.builder().code(rule.getCode()).name(rule.getName()).rate(rule.getRate())
+				.baseAmount(money(baseAmount)).rebateAmount(rebateAmount)
+				.explanation(rule.getRate() + "% DJB employee rebate applied on eligible domestic bill").build());
+	}
+
 	private boolean isFreeWaterEligible(RebateCalculationContext context, DJBMonthlyRebate rule) {
 
-		if (context.getConsumption() == null || rule.getMaxConsumptionKl() == null
-				|| context.getConsumption().compareTo(rule.getMaxConsumptionKl()) > 0) {
+		if (context.getConsumption() == null || rule.getMaxConsumptionKl() == null) {
+			return false;
+		}
+
+		/*
+		 * For a non-bulk domestic connection the 20 KL ceiling applies directly.
+		 * For a bulk domestic connection DJB defines the free-water limit per
+		 * dwelling unit, so the effective limit is 20 KL x dwelling units.
+		 * Do not apply the single-unit 20 KL check before the bulk calculation.
+		 */
+		if (!context.isBulkConnection()
+				&& context.getConsumption().compareTo(rule.getMaxConsumptionKl()) > 0) {
 			return false;
 		}
 
@@ -155,8 +203,20 @@ public class RebateCalculationService {
 			return false;
 		}
 
-		if (!Boolean.TRUE.equals(rule.getBulkApplicable()) && context.isBulkConnection()) {
-			return false;
+		if (context.isBulkConnection()) {
+			if (!Boolean.TRUE.equals(rule.getBulkApplicable())) {
+				return false;
+			}
+			// DJB bulk domestic free-water eligibility is per dwelling unit.
+			// Without a valid dwelling-unit count we must not grant the rebate.
+			if (context.getDwellingUnitCount() == null || context.getDwellingUnitCount() <= 0) {
+				return false;
+			}
+			BigDecimal bulkLimit = rule.getMaxConsumptionKl()
+					.multiply(BigDecimal.valueOf(context.getDwellingUnitCount()));
+			if (context.getConsumption().compareTo(bulkLimit) > 0) {
+				return false;
+			}
 		}
 
 		return true;
@@ -167,9 +227,9 @@ public class RebateCalculationService {
 				|| rule.getEligibleReadingQualityCodes().isEmpty() || rule.getEligibleReadingQualityCodes().stream()
 						.anyMatch(code -> code != null && code.equalsIgnoreCase(context.getReadingQualityCode()));
 
+		String currentBasis = context.getBillingBasis() == null ? null : context.getBillingBasis().name();
 		boolean basisEligible = rule.getEligibleBillingBasis() == null || rule.getEligibleBillingBasis().isEmpty()
-				|| rule.getEligibleBillingBasis().stream().anyMatch(basis -> basis != null && basis
-						.equalsIgnoreCase(context.getBillingBasis() == null ? null : context.getBillingBasis().name()));
+				|| rule.getEligibleBillingBasis().stream().anyMatch(basis -> isConfiguredBillingBasisEligible(basis, context, currentBasis));
 
 		if (rule.getEligibleReadingQualityCodes() == null || rule.getEligibleReadingQualityCodes().isEmpty()) {
 			readingEligible = "OK".equalsIgnoreCase(context.getReadingQualityCode())
@@ -177,10 +237,33 @@ public class RebateCalculationService {
 		}
 
 		if (rule.getEligibleBillingBasis() == null || rule.getEligibleBillingBasis().isEmpty()) {
-			basisEligible = BillingBasis.ACTUAL.equals(context.getBillingBasis());
+			basisEligible = isMeterOkActualBasis(context);
 		}
 
 		return readingEligible && basisEligible;
+	}
+
+	private boolean isConfiguredBillingBasisEligible(String configuredBasis, RebateCalculationContext context, String currentBasis) {
+		if (configuredBasis == null || currentBasis == null) {
+			return false;
+		}
+		if (configuredBasis.equalsIgnoreCase(currentBasis)) {
+			return true;
+		}
+		// DJB source says the free-water concession is based on Meter-OK. A corrected
+		// actual cycle with RQC=OK is still an OK-meter billing outcome, so an MDMS rule
+		// configured for ACTUAL also covers CORRECTED_ACTUAL.
+		return "ACTUAL".equalsIgnoreCase(configuredBasis)
+				&& "CORRECTED_ACTUAL".equalsIgnoreCase(currentBasis)
+				&& "OK".equalsIgnoreCase(context.getReadingQualityCode());
+	}
+
+	private boolean isMeterOkActualBasis(RebateCalculationContext context) {
+		if (!"OK".equalsIgnoreCase(context.getReadingQualityCode()) || context.getBillingBasis() == null) {
+			return false;
+		}
+		return BillingBasis.ACTUAL.equals(context.getBillingBasis())
+				|| BillingBasis.CORRECTED_ACTUAL.equals(context.getBillingBasis());
 	}
 
 	private boolean isRwhRule(String code) {

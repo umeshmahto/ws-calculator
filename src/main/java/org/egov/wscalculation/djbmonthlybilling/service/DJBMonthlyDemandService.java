@@ -221,9 +221,21 @@ public class DJBMonthlyDemandService {
 		RebateCalculationContext rebateContext = RebateCalculationContext.builder().consumption(consumption)
 				.billingBasis(cycle.getBillingbasis()).readingQualityCode(cycle.getReadingqualitycode())
 				.consumerType(resolveConsumerType(category)).propertyCategory(resolvePropertyCategory(category))
-				.connectionType(category).bulkConnection(false)
-				.propertyAreaSqm(property.getSuperBuiltUpArea()).functionalRwh(false)
-				.functionalWastewaterRecycling(false).totalBillBeforeRebate(grossAmount)
+				.connectionType(category)
+				.bulkConnection(readBooleanDetail(connection, property, "bulkConnection", "isBulkConnection", "bulk"))
+				.dwellingUnitCount(readIntegerDetail(property, connection, "numberOfDwellingUnits",
+						"dwellingUnitCount", "noOfDwellingUnits", "totalDwellingUnits"))
+				.propertyAreaSqm(property.getSuperBuiltUpArea()).functionalRwh(
+						readBooleanDetail(connection, property, "functionalRwh", "isFunctionalRwh",
+								"rwhFunctional", "rainWaterHarvestingFunctional"))
+				.functionalWastewaterRecycling(readBooleanDetail(connection, property,
+						"functionalWastewaterRecycling", "isFunctionalWastewaterRecycling",
+						"wastewaterRecyclingFunctional", "wasteWaterRecyclingFunctional"))
+				.djbEmployeeEligible(readBooleanDetail(connection, property, "djbEmployeeEligible",
+						"isDjbEmployeeEligible", "employeeRebateEligible"))
+				.eligibleConnectionCount(readIntegerDetail(connection, property, "eligibleConnectionCount",
+						"djbEmployeeEligibleConnectionCount", "employeeConnectionCount"))
+				.totalBillBeforeRebate(grossAmount)
 				.freeWaterEligibleAmount(water.getTotalWaterCharge()).build();
 
 		RebateCalculationResult rebate = rebateCalculationService.calculate(rebateContext, rebates);
@@ -687,6 +699,67 @@ public class DJBMonthlyDemandService {
 		}
 
 		return calculatorUtil.getWaterConnectionObject(connections);
+	}
+
+	private boolean readBooleanDetail(WaterConnection connection, Property property, String... keys) {
+		Object value = firstDetail(connection == null ? null : connection.getAdditionalDetails(),
+				property == null ? null : property.getAdditionalDetails(), keys);
+		if (value == null) {
+			return false;
+		}
+		if (value instanceof Boolean) {
+			return (Boolean) value;
+		}
+		return Boolean.parseBoolean(String.valueOf(value));
+	}
+
+	private Integer readIntegerDetail(Object primary, Object secondary, String... keys) {
+		Object value = firstDetail(primary == null ? null : getAdditionalDetails(primary),
+				secondary == null ? null : getAdditionalDetails(secondary), keys);
+		if (value == null) {
+			return null;
+		}
+		try {
+			return new BigDecimal(String.valueOf(value)).intValueExact();
+		} catch (Exception ex) {
+			return null;
+		}
+	}
+
+	private Object getAdditionalDetails(Object source) {
+		if (source instanceof Property) {
+			return ((Property) source).getAdditionalDetails();
+		}
+		if (source instanceof WaterConnection) {
+			return ((WaterConnection) source).getAdditionalDetails();
+		}
+		return null;
+	}
+
+	private Object firstDetail(Object primary, Object secondary, String... keys) {
+		Map<String, Object> primaryMap = toMap(primary);
+		Map<String, Object> secondaryMap = toMap(secondary);
+		for (String key : keys) {
+			if (primaryMap.containsKey(key) && primaryMap.get(key) != null) {
+				return primaryMap.get(key);
+			}
+			if (secondaryMap.containsKey(key) && secondaryMap.get(key) != null) {
+				return secondaryMap.get(key);
+			}
+		}
+		return null;
+	}
+
+	@SuppressWarnings("unchecked")
+	private Map<String, Object> toMap(Object details) {
+		if (details == null) {
+			return Collections.emptyMap();
+		}
+		try {
+			return objectMapper.convertValue(details, Map.class);
+		} catch (IllegalArgumentException ex) {
+			return Collections.emptyMap();
+		}
 	}
 
 	private User resolvePayer(WaterConnection connection, Property property) {

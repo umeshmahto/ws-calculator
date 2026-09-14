@@ -28,6 +28,12 @@ public class RebateCalculationContext {
 
     private Integer dwellingUnitCount;
 
+    /** True only when the source connection/property data confirms DJB employee eligibility. */
+    private boolean djbEmployeeEligible;
+
+    /** Number of eligible domestic connections for the employee rebate. */
+    private Integer eligibleConnectionCount;
+
     private BigDecimal propertyAreaSqm;
 
     private boolean functionalRwh;

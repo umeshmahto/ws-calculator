@@ -40,4 +40,11 @@ public class DJBMonthlyBillingTestRequest {
      * explicitly. The current rebate service does not infer tax-head scope.
      */
     private BigDecimal freeWaterEligibleAmount;
+
+    private boolean bulkConnection;
+    private Integer dwellingUnitCount;
+    private boolean functionalRwh;
+    private boolean functionalWastewaterRecycling;
+    private boolean djbEmployeeEligible;
+    private Integer eligibleConnectionCount;
 }

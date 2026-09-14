@@ -78,8 +78,12 @@ public class DJBMonthlyBillingTestService {
 				.consumption(request.getConsumption()).billingBasis(request.getBillingBasis())
 				.readingQualityCode(request.getReadingQualityCode()).consumerType(request.getConsumerCategory())
 				.propertyCategory(request.getConsumerCategory()).connectionType(request.getTariffCategory())
-				.bulkConnection(false).propertyAreaSqm(request.getBuiltUpAreaSqm()).functionalRwh(false)
-				.functionalWastewaterRecycling(false).totalBillBeforeRebate(totalBeforeRebate)
+				.bulkConnection(request.isBulkConnection()).dwellingUnitCount(request.getDwellingUnitCount())
+				.propertyAreaSqm(request.getBuiltUpAreaSqm()).functionalRwh(request.isFunctionalRwh())
+				.functionalWastewaterRecycling(request.isFunctionalWastewaterRecycling())
+				.djbEmployeeEligible(request.isDjbEmployeeEligible())
+				.eligibleConnectionCount(request.getEligibleConnectionCount())
+				.totalBillBeforeRebate(totalBeforeRebate)
 				.freeWaterEligibleAmount(request.getFreeWaterEligibleAmount()).build();
 
 		RebateCalculationResult rebate = rebateCalculationService.calculate(rebateContext, rebates);
