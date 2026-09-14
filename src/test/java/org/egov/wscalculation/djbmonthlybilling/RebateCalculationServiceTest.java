@@ -32,12 +32,13 @@ class RebateCalculationServiceTest {
                 .propertyCategory("CAT_I")
                 .connectionType("DOMESTIC")
                 .bulkConnection(false)
-                .freeWaterEligibleAmount(bd("251.81"))
+                .freeWaterEligibleAmount(bd("315.05"))
                 .build();
 
         RebateCalculationResult result = service.calculate(context, Arrays.asList(freeWaterRule()));
 
-        assertEquals(bd("251.81"), result.getTotalRebate());
+        assertEquals(bd("315.05"), result.getTotalRebate());
+        assertEquals(bd("315.05"), result.getRebateItems().get(0).getBaseAmount());
         assertEquals(1, result.getRebateItems().size());
     }
 
@@ -47,7 +48,7 @@ class RebateCalculationServiceTest {
                 .consumption(bd("20"))
                 .billingBasis(BillingBasis.AVERAGE)
                 .readingQualityCode("MLOC")
-                .freeWaterEligibleAmount(bd("251.81"))
+                .freeWaterEligibleAmount(bd("315.05"))
                 .build();
 
         RebateCalculationResult result = service.calculate(context, Arrays.asList(freeWaterRule()));
@@ -79,12 +80,12 @@ class RebateCalculationServiceTest {
                 .propertyCategory("CAT_I")
                 .connectionType("DOMESTIC")
                 .bulkConnection(false)
-                .freeWaterEligibleAmount(bd("251.81"))
+                .freeWaterEligibleAmount(bd("315.05"))
                 .build();
 
         RebateCalculationResult result = service.calculate(context, Arrays.asList(freeWaterRule()));
 
-        assertEquals(bd("251.81"), result.getTotalRebate());
+        assertEquals(bd("315.05"), result.getTotalRebate());
     }
 
     @Test
@@ -116,7 +117,7 @@ class RebateCalculationServiceTest {
                 .propertyCategory("CAT_I")
                 .connectionType("DOMESTIC")
                 .bulkConnection(true)
-                .freeWaterEligibleAmount(bd("251.81"))
+                .freeWaterEligibleAmount(bd("315.05"))
                 .build();
 
         RebateCalculationResult result = service.calculate(context, Arrays.asList(freeWaterRule()));

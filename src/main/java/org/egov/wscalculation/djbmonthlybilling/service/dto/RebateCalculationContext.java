@@ -47,8 +47,8 @@ public class RebateCalculationContext {
     private BigDecimal totalBillBeforeRebate;
 
     /**
-     * The 20 KL free-water rule is intentionally supplied a base amount
-     * by the caller rather than guessing which tax-heads are free.
+     * The 20 KL free-water concession applies to the complete billable
+     * water + sewerage amount for an eligible Meter-OK cycle.
      */
     private BigDecimal freeWaterEligibleAmount;
 

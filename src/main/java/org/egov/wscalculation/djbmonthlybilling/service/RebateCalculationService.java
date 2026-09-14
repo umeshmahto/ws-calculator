@@ -73,10 +73,9 @@ public class RebateCalculationService {
 		BigDecimal baseAmount = context.getFreeWaterEligibleAmount();
 
 		/*
-		 * Do not infer the tax-head scope of the free-water exemption here. The DJB
-		 * source says free water up to 20 KL is 100% and requires Meter OK basis, but
-		 * it does not in the supplied section define every tax-head that must be
-		 * zeroed. The caller supplies the eligible amount explicitly.
+		 * The caller supplies the complete eligible water + sewerage bill amount.
+		 * For an eligible Meter-OK reading at or below the free-water limit, the
+		 * 100% concession therefore makes the user's payable amount zero.
 		 */
 		if (baseAmount == null || baseAmount.signum() <= 0) {
 			return;

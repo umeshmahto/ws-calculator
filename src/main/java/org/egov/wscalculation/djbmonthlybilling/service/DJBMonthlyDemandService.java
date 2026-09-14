@@ -236,7 +236,7 @@ public class DJBMonthlyDemandService {
 				.eligibleConnectionCount(readIntegerDetail(connection, property, "eligibleConnectionCount",
 						"djbEmployeeEligibleConnectionCount", "employeeConnectionCount"))
 				.totalBillBeforeRebate(grossAmount)
-				.freeWaterEligibleAmount(water.getTotalWaterCharge()).build();
+				.freeWaterEligibleAmount(grossAmount).build();
 
 		RebateCalculationResult rebate = rebateCalculationService.calculate(rebateContext, rebates);
 

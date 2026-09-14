@@ -53,9 +53,6 @@ class DJBShadowMeterBillingServiceValidationTest {
 	@Test
 	void shouldAllowNonContiguousBillingPeriod() {
 		MeterReading reading = validReading(3000L, 4000L, 60d, 70d);
-		when(billingCycleDao.findByConnectionAndPeriod("dl.djb", reading.getConnectionNo(), 3000L, 4000L))
-				.thenReturn(null);
-
 		org.junit.jupiter.api.Assertions.assertDoesNotThrow(() -> service.validateCanCreateBillingCycle(reading));
 	}
 
