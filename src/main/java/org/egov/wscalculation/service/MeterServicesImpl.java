@@ -62,12 +62,15 @@ public class MeterServicesImpl implements MeterService {
 			wsCalulationWorkflowValidator.applicationValidation(meterConnectionRequest.getRequestInfo(),meterConnectionRequest.getMeterReading().getTenantId(),meterConnectionRequest.getMeterReading().getConnectionNo(),genratedemand);
 			wsCalculationValidator.validateMeterReading(meterConnectionRequest.getRequestInfo(),meterConnectionRequest.getMeterReading(), true);
 		}
+		enrichmentService.enrichMeterReadingRequest(meterConnectionRequest.getRequestInfo(),meterConnectionRequest.getMeterReading());
+
 		if (meterConnectionRequest.getMeterReading().getGenerateDemand()
 				&& "dl.djb".equalsIgnoreCase(meterConnectionRequest.getMeterReading().getTenantId())) {
-			djbShadowMeterBillingService.validateCanCreateBillingCycle(meterConnectionRequest.getMeterReading());
+			djbShadowMeterBillingService.prepareBillingCycleReservation(
+						meterConnectionRequest.getMeterReading(),
+						meterConnectionRequest.getRequestInfo());
 		}
 
-		enrichmentService.enrichMeterReadingRequest(meterConnectionRequest.getRequestInfo(),meterConnectionRequest.getMeterReading());
 		meterReadingsList.add(meterConnectionRequest.getMeterReading());
 		wSCalculationDao.saveMeterReading(meterConnectionRequest);
 		if (meterConnectionRequest.getMeterReading().getGenerateDemand()) {

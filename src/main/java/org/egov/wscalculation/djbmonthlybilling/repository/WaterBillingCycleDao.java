@@ -15,6 +15,11 @@ public interface WaterBillingCycleDao {
         WaterBillingCycle findByConnectionAndPeriod(String tenantId, String connectionNo,
                         Long billingPeriodFrom, Long billingPeriodTo);
 
+        java.util.List<WaterBillingCycle> findOverlappingCycles(String tenantId, String connectionNo,
+                        Long billingPeriodFrom, Long billingPeriodTo);
+
+        int lockConnectionForBilling(String tenantId, String connectionNo);
+
         WaterBillingCycle findLatestByConnection(String tenantId, String connectionNo);
 
         WaterBillingCycle findLatestOkByConnection(String tenantId, String connectionNo);

@@ -15,6 +15,23 @@ public class DJBMonthlyBillingQueryBuilder {
                "AND billingperiodfrom = ? AND billingperiodto = ?";
     }
 
+    public String findOverlappingCycles() {
+        return "SELECT * FROM eg_ws_billingcycle " +
+               "WHERE tenantid = ? AND connectionno = ? " +
+               "AND billingperiodfrom < ? AND billingperiodto > ? " +
+               "ORDER BY billingperiodfrom ASC";
+    }
+
+    /**
+     * Database-level per-connection transaction lock. Uses PostgreSQL advisory
+     * locking; no new table or schema object is required. The lock lives only
+     * for the current transaction and serializes billing-cycle reservation for
+     * a given tenant+connection across application instances.
+     */
+    public String lockConnectionForBilling() {
+        return "SELECT pg_advisory_xact_lock(hashtextextended(?, 0))";
+    }
+
     public String findLatestByConnection() {
         return "SELECT * FROM eg_ws_billingcycle " +
                "WHERE tenantid = ? AND connectionno = ? " +

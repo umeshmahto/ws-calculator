@@ -56,6 +56,14 @@ public class WaterBillingCycleDaoImpl implements WaterBillingCycleDao {
         return r.isEmpty() ? null : r.get(0);
     }
 
+    @Override public List<WaterBillingCycle> findOverlappingCycles(String t, String c, Long from, Long to) {
+        return jdbcTemplate.query(queryBuilder.findOverlappingCycles(), rowMapper, t, c, to, from);
+    }
+
+    @Override public int lockConnectionForBilling(String t, String c) {
+        return jdbcTemplate.update(queryBuilder.lockConnectionForBilling(), t + ":" + c);
+    }
+
     @Override public WaterBillingCycle findLatestByConnection(String t, String c) {
         List<WaterBillingCycle> r = jdbcTemplate.query(queryBuilder.findLatestByConnection(), rowMapper, t, c);
         return r.isEmpty() ? null : r.get(0);

@@ -72,6 +72,8 @@ public class DJBShadowMeterBillingService {
 		try {
 			reading.setStatus(null);
 			enrichmentService.enrichMeterReadingRequest(request.getRequestInfo(), reading);
+			prepareBillingCycleReservation(reading, request.getRequestInfo());
+
 			MeterConnectionRequest persistenceRequest = MeterConnectionRequest.builder()
 					.requestInfo(request.getRequestInfo()).meterReading(reading).build();
 			wSCalculationDao.saveMeterReading(persistenceRequest);
@@ -110,7 +112,7 @@ public class DJBShadowMeterBillingService {
 		boolean existing = cycle != null;
 
 		if (!existing) {
-			validateBillingPeriodContinuity(tenantId, connectionNo, from, to);
+			validateNoOverlappingBillingPeriod(tenantId, connectionNo, from, to);
 		}
 
 		if (existing && (StringUtils.hasText(cycle.getBillid())
@@ -323,32 +325,84 @@ public class DJBShadowMeterBillingService {
 		transactionTemplate.executeWithoutResult(status -> billingCycleDao.update(cycle));
 	}
 
-	private void validateBillingPeriodContinuity(String tenantId, String connectionNo, long from, long to) {
-		WaterBillingCycle latest = billingCycleDao.findLatestByConnection(tenantId, connectionNo);
-		if (latest == null) {
+	private void validateNoOverlappingBillingPeriod(String tenantId, String connectionNo, long from, long to) {
+		if (to <= from) {
+			throw new IllegalArgumentException("Current reading date must be after last reading date");
+		}
+
+		List<WaterBillingCycle> overlaps = billingCycleDao.findOverlappingCycles(tenantId, connectionNo, from, to);
+		if (overlaps == null || overlaps.isEmpty()) {
 			return;
 		}
 
-		Long latestFrom = latest.getBillingperiodfrom();
-		Long latestTo = latest.getBillingperiodto();
-		if (latestFrom == null || latestTo == null) {
-			throw new IllegalStateException(
-					"Existing billing cycle has invalid billing period and cannot accept a new monthly cycle: "
-							+ latest.getId());
+		WaterBillingCycle overlap = overlaps.get(0);
+		throw new IllegalStateException(
+				"Billing period overlaps an existing billing cycle. Existing period: "
+						+ overlap.getBillingperiodfrom() + "-" + overlap.getBillingperiodto()
+						+ ", requested period: " + from + "-" + to
+						+ ". Existing cycle: " + overlap.getId());
+	}
+
+	/**
+	 * Enterprise-safe reservation using the existing billing-cycle table.
+	 *
+	 * The transaction takes a PostgreSQL advisory lock for tenant+connection,
+	 * checks exact/finalized duplicates and interval overlap, then inserts a
+	 * CREATED reservation when necessary. No additional table is required.
+	 * Because the reservation survives after the short transaction, a later retry
+	 * can continue the same incomplete cycle if Kafka/external billing fails.
+	 */
+	public void prepareBillingCycleReservation(MeterReading reading, RequestInfo requestInfo) {
+		validateMeterReadingOrder(reading);
+
+		if (!"dl.djb".equalsIgnoreCase(reading.getTenantId())) {
+			return;
 		}
 
-		if (from < latestTo) {
-			throw new IllegalStateException(
-					"Billing period overlaps the latest billing cycle " + latest.getId()
-							+ ". Existing period: " + latestFrom + "-" + latestTo
-							+ ", requested period: " + from + "-" + to);
-		}
+		final String tenantId = reading.getTenantId();
+		final String connectionNo = reading.getConnectionNo();
+		final long from = reading.getLastReadingDate();
+		final long to = reading.getCurrentReadingDate();
 
-		if (from > latestTo) {
-			throw new IllegalStateException(
-					"Billing period has a gap after the latest billing cycle " + latest.getId()
-							+ ". Existing period ends at " + latestTo + " but requested period starts at " + from);
-		}
+		transactionTemplate.executeWithoutResult(status -> {
+			billingCycleDao.lockConnectionForBilling(tenantId, connectionNo);
+
+			WaterBillingCycle existing = billingCycleDao.findByConnectionAndPeriod(tenantId, connectionNo, from, to);
+			if (existing != null) {
+				if (StringUtils.hasText(existing.getBillid())
+						|| BillingCycleStatus.BILL_GENERATED.equals(existing.getStatus())) {
+					throw new IllegalStateException(
+							"A billing cycle with the same connection and period is already billed: "
+									+ existing.getId() + ". Use correction/revision flow instead.");
+				}
+				// Existing non-finalized cycle is a recoverable reservation.
+				reading.setBillingCycleId(existing.getId());
+				return;
+			}
+
+			validateNoOverlappingBillingPeriod(tenantId, connectionNo, from, to);
+
+			WaterBillingCycle reservation = new WaterBillingCycle();
+			reservation.setId(UUID.randomUUID().toString());
+			reservation.setTenantid(tenantId);
+			reservation.setConnectionno(connectionNo);
+			reservation.setBillingperiodfrom(from);
+			reservation.setBillingperiodto(to);
+			reservation.setMeterreadingid(reading.getId());
+			reservation.setReadingqualitycode(reading.getReadingQualityCode());
+			reservation.setCurrentreading(BigDecimal.valueOf(reading.getCurrentReading()));
+			reservation.setCurrentreadingdate(reading.getCurrentReadingDate());
+			reservation.setOnepointfivexflag(false);
+			reservation.setAveragecyclecount(0);
+			reservation.setProvisionalcyclecount(0);
+			reservation.setStatus(BillingCycleStatus.CREATED);
+			reservation.setCreatedby(actor(requestInfo));
+			reservation.setCreatedtime(System.currentTimeMillis());
+			reservation.setLastmodifiedby(actor(requestInfo));
+			reservation.setLastmodifiedtime(System.currentTimeMillis());
+			billingCycleDao.save(reservation);
+			reading.setBillingCycleId(reservation.getId());
+		});
 	}
 
 	private void validateMeterReadingOrder(MeterReading reading) {
@@ -380,15 +434,7 @@ public class DJBShadowMeterBillingService {
 		if (!"dl.djb".equalsIgnoreCase(reading.getTenantId())) {
 			return;
 		}
-		long from = Math.min(reading.getLastReadingDate(), reading.getCurrentReadingDate());
-		long to = Math.max(reading.getLastReadingDate(), reading.getCurrentReadingDate());
-		WaterBillingCycle existing = billingCycleDao.findByConnectionAndPeriod(reading.getTenantId(),
-				reading.getConnectionNo(), from, to);
-		if (existing != null && (StringUtils.hasText(existing.getBillid())
-				|| BillingCycleStatus.BILL_GENERATED.equals(existing.getStatus()))) {
-			throw new IllegalStateException("A billing cycle with the same connection and period is already billed: "
-					+ existing.getId() + ". Use correction/revision flow instead.");
-		}
+		validateMeterReadingOrder(reading);
 	}
 
 	private void validate(MeterConnectionRequest request) {

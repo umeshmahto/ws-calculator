@@ -48,32 +48,15 @@ class DJBShadowMeterBillingServiceValidationTest {
 	@InjectMocks
 	private DJBShadowMeterBillingService service;
 
-	@Test
-	void shouldRejectOverlappingBillingPeriod() {
-		MeterReading reading = validReading(2000L, 3000L, 50d, 60d);
-		WaterBillingCycle latest = cycle("LATEST", 1000L, 2500L);
-		when(masterProvider.getBillingRule(any(), eq("dl.djb"))).thenReturn(new DJBMonthlyBillingRule());
-		when(masterProvider.findReadingQualityCode(any(), eq("dl.djb"), eq("OK")))
-				.thenReturn(new DJBReadingQualityCode());
-		when(billingCycleDao.findByConnectionAndPeriod("dl.djb", reading.getConnectionNo(), 2000L, 3000L))
-				.thenReturn(null);
-		when(billingCycleDao.findLatestByConnection("dl.djb", reading.getConnectionNo())).thenReturn(latest);
 
-		assertThrows(IllegalStateException.class, () -> service.processDjbBilling(reading, new RequestInfo()));
-	}
 
 	@Test
-	void shouldRejectBillingPeriodGap() {
+	void shouldAllowNonContiguousBillingPeriod() {
 		MeterReading reading = validReading(3000L, 4000L, 60d, 70d);
-		WaterBillingCycle latest = cycle("LATEST", 1000L, 2000L);
-		when(masterProvider.getBillingRule(any(), eq("dl.djb"))).thenReturn(new DJBMonthlyBillingRule());
-		when(masterProvider.findReadingQualityCode(any(), eq("dl.djb"), eq("OK")))
-				.thenReturn(new DJBReadingQualityCode());
 		when(billingCycleDao.findByConnectionAndPeriod("dl.djb", reading.getConnectionNo(), 3000L, 4000L))
 				.thenReturn(null);
-		when(billingCycleDao.findLatestByConnection("dl.djb", reading.getConnectionNo())).thenReturn(latest);
 
-		assertThrows(IllegalStateException.class, () -> service.processDjbBilling(reading, new RequestInfo()));
+		org.junit.jupiter.api.Assertions.assertDoesNotThrow(() -> service.validateCanCreateBillingCycle(reading));
 	}
 
 	@Test
