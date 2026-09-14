@@ -52,30 +52,48 @@ class TariffCalculationServiceTest {
     }
 
     @Test
-    void shouldCalculateDomestic25KlProgressively() {
+    void shouldCalculateDomestic25KlUsingApplicableSlab() {
         TariffCalculationResult result =
                 service.calculate(bd("25"), "DOMESTIC",
                         Arrays.asList(domestic));
 
-        assertEquals(bd("237.20"), result.getWaterVolumetricCharge());
+        assertEquals(bd("659.00"), result.getWaterVolumetricCharge());
         assertEquals(bd("219.62"), result.getServiceCharge());
-        assertEquals(bd("456.82"), result.getTotalWaterCharge());
-        assertEquals(2, result.getSlabCharges().size());
+        assertEquals(bd("878.62"), result.getTotalWaterCharge());
+        assertEquals(1, result.getSlabCharges().size());
+
+        assertEquals(bd("25.000"), result.getSlabCharges().get(0).getUnits());
+        assertEquals(bd("26.36"), result.getSlabCharges().get(0).getRatePerKl());
+        assertEquals(bd("659.00"), result.getSlabCharges().get(0).getCharge());
     }
 
     @Test
-    void shouldCalculateDomestic35KlAcrossThreeSlabs() {
+    void shouldCalculateDomestic35KlUsingApplicableSlab() {
         TariffCalculationResult result =
                 service.calculate(bd("35"), "DOMESTIC",
                         Arrays.asList(domestic));
 
-        BigDecimal expectedVolumetric = bd("588.65");
-        BigDecimal expectedTotal = bd("881.47");
+        BigDecimal expectedVolumetric = bd("1537.55");
+        BigDecimal expectedTotal = bd("1830.37");
 
         assertEquals(expectedVolumetric, result.getWaterVolumetricCharge());
         assertEquals(bd("292.82"), result.getServiceCharge());
         assertEquals(expectedTotal, result.getTotalWaterCharge());
-        assertEquals(3, result.getSlabCharges().size());
+        assertEquals(1, result.getSlabCharges().size());
+    }
+
+    @Test
+    void shouldCalculateDomestic39KlUsingSingleApplicableSlab() {
+        TariffCalculationResult result =
+                service.calculate(bd("39"), "DOMESTIC",
+                        Arrays.asList(domestic));
+
+        assertEquals(bd("1713.27"), result.getWaterVolumetricCharge());
+        assertEquals(bd("292.82"), result.getServiceCharge());
+        assertEquals(bd("2006.09"), result.getTotalWaterCharge());
+        assertEquals(1, result.getSlabCharges().size());
+        assertEquals(bd("39.000"), result.getSlabCharges().get(0).getUnits());
+        assertEquals(bd("43.93"), result.getSlabCharges().get(0).getRatePerKl());
     }
 
     @Test
@@ -94,7 +112,7 @@ class TariffCalculationServiceTest {
                         Arrays.asList(commercial));
 
         assertEquals("COMMERCIAL", result.getCategory());
-        assertEquals(bd("503.64"), result.getTotalWaterCharge());
+        assertEquals(bd("556.32"), result.getTotalWaterCharge());
     }
 
     @Test

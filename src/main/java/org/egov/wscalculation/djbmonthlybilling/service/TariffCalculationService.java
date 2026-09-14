@@ -17,7 +17,7 @@ import org.springframework.util.StringUtils;
  * DJB monthly water tariff calculation.
  *
  * Responsibilities: - Resolve the DJB tariff by consumer category. - Apply
- * progressive slab rates. - Select the applicable monthly service charge.
+ * single applicable tariff rate based on the overall monthly consumption band. - Select the applicable monthly service charge.
  *
  * This class does not create tax-head estimates, demands or bills. Existing
  * EstimationService is intentionally untouched.
@@ -45,36 +45,35 @@ public class TariffCalculationService {
 			throw new IllegalArgumentException("No active slabs configured for DJB tariff: " + tariff.getId());
 		}
 
-		BigDecimal waterCharge = BigDecimal.ZERO;
-		List<TariffSlabCharge> slabCharges = new ArrayList<>();
-
-		for (DJBMonthlyWaterTariffSlab slab : slabs) {
-
-			BigDecimal from = zeroIfNull(slab.getFrom());
-			BigDecimal to = slab.getTo();
-
-			if (to != null && to.compareTo(from) <= 0) {
-				throw new IllegalArgumentException("Invalid DJB tariff slab: from=" + from + ", to=" + to);
-			}
-
-			BigDecimal units = calculateUnitsInSlab(consumption, from, to);
-
-			if (units.signum() <= 0) {
-				continue;
-			}
-
-			if (slab.getRatePerKl() == null || slab.getRatePerKl().signum() < 0) {
-				throw new IllegalArgumentException("Invalid rate in DJB tariff slab");
-			}
-
-			BigDecimal charge = units.multiply(slab.getRatePerKl()).setScale(MONEY_SCALE, RoundingMode.HALF_UP);
-
-			waterCharge = waterCharge.add(charge);
-
-			slabCharges.add(TariffSlabCharge.builder().from(from).to(to)
-					.units(units.setScale(CONSUMPTION_SCALE, RoundingMode.HALF_UP)).ratePerKl(slab.getRatePerKl())
-					.charge(charge).build());
+		// Apply the single tariff rate corresponding to the overall monthly consumption.
+		// The source DJB document defines consumption bands and rates, but does not
+		// explicitly prescribe progressive splitting across multiple bands. Until
+		// DJB confirms that interpretation, use one applicable slab for the full
+		// consumption.
+		DJBMonthlyWaterTariffSlab applicableSlab = findApplicableSlab(consumption, slabs);
+		if (applicableSlab == null) {
+			throw new IllegalArgumentException("No applicable DJB tariff slab for consumption: " + consumption);
 		}
+
+		BigDecimal from = zeroIfNull(applicableSlab.getFrom());
+		BigDecimal to = applicableSlab.getTo();
+
+		if (to != null && to.compareTo(from) <= 0) {
+			throw new IllegalArgumentException("Invalid DJB tariff slab: from=" + from + ", to=" + to);
+		}
+
+		if (applicableSlab.getRatePerKl() == null || applicableSlab.getRatePerKl().signum() < 0) {
+			throw new IllegalArgumentException("Invalid rate in DJB tariff slab");
+		}
+
+		BigDecimal waterCharge = consumption.multiply(applicableSlab.getRatePerKl())
+				.setScale(MONEY_SCALE, RoundingMode.HALF_UP);
+
+		List<TariffSlabCharge> slabCharges = new ArrayList<>();
+		BigDecimal charge = waterCharge;
+		slabCharges.add(TariffSlabCharge.builder().from(from).to(to)
+				.units(consumption.setScale(CONSUMPTION_SCALE, RoundingMode.HALF_UP))
+				.ratePerKl(applicableSlab.getRatePerKl()).charge(charge).build());
 
 		BigDecimal serviceCharge = findServiceCharge(consumption, slabs);
 
@@ -86,19 +85,25 @@ public class TariffCalculationService {
 				.slabCharges(slabCharges).build();
 	}
 
-	private BigDecimal calculateUnitsInSlab(BigDecimal consumption, BigDecimal from, BigDecimal to) {
+	private DJBMonthlyWaterTariffSlab findApplicableSlab(BigDecimal consumption,
+			List<DJBMonthlyWaterTariffSlab> slabs) {
 
-		if (consumption.compareTo(from) <= 0) {
-			return BigDecimal.ZERO;
+		for (DJBMonthlyWaterTariffSlab slab : slabs) {
+			BigDecimal from = zeroIfNull(slab.getFrom());
+			BigDecimal to = slab.getTo();
+
+			// Treat slab upper bounds as inclusive. Since slabs are sorted by
+			// lower bound, an exact boundary such as 20 or 30 resolves to the
+			// first matching slab (0-20, then 20-30, etc.).
+			boolean matches = consumption.compareTo(from) >= 0
+					&& (to == null || consumption.compareTo(to) <= 0);
+
+			if (matches) {
+				return slab;
+			}
 		}
 
-		BigDecimal upper = to == null ? consumption : consumption.min(to);
-
-		if (upper.compareTo(from) <= 0) {
-			return BigDecimal.ZERO;
-		}
-
-		return upper.subtract(from);
+		return null;
 	}
 
 	private BigDecimal findServiceCharge(BigDecimal consumption, List<DJBMonthlyWaterTariffSlab> slabs) {
