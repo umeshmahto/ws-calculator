@@ -96,6 +96,23 @@ class DJBMonthlyBillingCalculationSnapshotServiceTest {
 	}
 
 	@Test
+	void shouldReuseExistingSnapshotWhenCycleRetryOccurs() throws Exception {
+		WaterBillingCycle cycle = validCycle();
+		DJBMonthlyBillingCalculation existing = DJBMonthlyBillingCalculation.builder()
+				.id("CALC-EXISTING").tenantid("dl.djb").billingcycleid(cycle.getId())
+				.build();
+
+		when(calculationDao.findByBillingCycle("dl.djb", cycle.getId())).thenReturn(existing);
+
+		String calculationId = service.persist(new RequestInfo(), cycle, new WaterConnection(), new Property(), null,
+				null, RebateCalculationResult.builder().totalRebate(BigDecimal.ZERO).rebateItems(Collections.emptyList()).build(),
+				null, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, Collections.<String>emptyList(), BigDecimal.ZERO);
+
+		assertEquals("CALC-EXISTING", calculationId);
+		verify(calculationDao).findByBillingCycle("dl.djb", cycle.getId());
+	}
+
+	@Test
 	void shouldPersistZroPendingSnapshotWithoutDemandOrBill() throws Exception {
 		WaterBillingCycle cycle = validCycle();
 		cycle.setBillingbasis(BillingBasis.ACTUAL);

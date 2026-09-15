@@ -66,7 +66,22 @@ public class WaterBillingCycleDaoImpl implements WaterBillingCycleDao {
 
 	@Override
 	public int lockConnectionForBilling(String t, String c) {
-		return jdbcTemplate.update(queryBuilder.lockConnectionForBilling(), t + ":" + c);
+		/*
+		 * pg_advisory_xact_lock(...) returns PostgreSQL VOID. It therefore must not
+		 * be mapped to Long/String via queryForObject; the PostgreSQL JDBC driver
+		 * exposes the VOID result as an empty value and type conversion fails.
+		 *
+		 * Execute the SELECT with a RowCallbackHandler instead. JdbcTemplate will
+		 * advance through the returned row without attempting to map the VOID value.
+		 * The lock remains transaction-scoped because this call executes inside the
+		 * existing TransactionTemplate transaction.
+		 */
+		jdbcTemplate.query(queryBuilder.lockConnectionForBilling(),
+				ps -> ps.setString(1, t + ":" + c),
+				rs -> {
+				// Consume the single VOID result row; no value mapping is required.
+			});
+		return 1;
 	}
 
 	@Override

@@ -50,6 +50,17 @@ public class DJBMonthlyBillingCalculationSnapshotService {
 			BigDecimal residualPaidCredit, BigDecimal carriedForwardCreditApplied,
 			List<String> carriedForwardCreditAllocationIds, BigDecimal netAmount) {
 
+		// Retry safety: if the snapshot was already inserted but the billing-cycle
+		// reference update failed, reuse the existing snapshot instead of attempting
+		// a second INSERT against the unique (tenantid, billingcycleid) key.
+		if (cycle != null && StringUtils.hasText(cycle.getId())) {
+			DJBMonthlyBillingCalculation existing = calculationDao.findByBillingCycle(
+					cycle.getTenantid(), cycle.getId());
+			if (existing != null && StringUtils.hasText(existing.getId())) {
+				return existing.getId();
+			}
+		}
+
 		String calculationId = UUID.randomUUID().toString();
 		long now = System.currentTimeMillis();
 

@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 
 import org.egov.common.contract.request.RequestInfo;
 import org.egov.wscalculation.djbmonthlybilling.model.BillingCorrection;
@@ -134,6 +135,40 @@ class CorrectionServiceTest {
 		assertEquals(CorrectionStatus.PENDING, result.getCorrection().getStatus());
 
 		verify(billingCorrectionDao).save(any(BillingCorrection.class));
+	}
+
+	@Test
+	void shouldNotCancelPreviousOkDemandDuringAutomaticCorrection() {
+		String tenantId = "dl.djb";
+		String connectionNo = "WS/DJB/2026-27/000367";
+
+		WaterBillingCycle previousOk = cycle("ok-1", BillingBasis.ACTUAL, 100L, 200L);
+		previousOk.setDemandid("demand-ok-1");
+
+		WaterBillingCycle provisional = cycle("prov-1", BillingBasis.PROVISIONAL, 200L, 300L);
+		provisional.setDemandid("demand-prov-1");
+
+		CorrectionPlan plan = CorrectionPlan.builder().correctionRequired(true)
+				.connectionNo(connectionNo).previousOkBillingCycleId(previousOk.getId())
+				.currentOkBillingCycleId("ok-2").cyclesToCorrect(Collections.singletonList(provisional))
+				.paidAdjustmentAmount(BigDecimal.ZERO).build();
+
+		Demand provisionalDemand = new Demand();
+		provisionalDemand.setId("demand-prov-1");
+
+		when(demandService.searchDemand(eq(tenantId), eq(Collections.singleton(connectionNo)),
+				eq(provisional.getBillingperiodfrom()), eq(provisional.getBillingperiodto()), any(RequestInfo.class),
+				eq(null), eq(false), eq(false))).thenReturn(Collections.singletonList(provisionalDemand));
+
+		when(demandRepository.updateDemand(any(RequestInfo.class), any(List.class)))
+				.thenReturn(Collections.singletonList(provisionalDemand));
+
+		service.deactivateSupersededDemands(new RequestInfo(), tenantId, plan);
+
+		verify(demandRepository).updateDemand(any(RequestInfo.class), any());
+		verify(demandService).searchDemand(eq(tenantId), eq(Collections.singleton(connectionNo)),
+			eq(provisional.getBillingperiodfrom()), eq(provisional.getBillingperiodto()), any(RequestInfo.class),
+				eq(null), eq(false), eq(false));
 	}
 
 	private WaterBillingCycle cycle(String id, BillingBasis basis, long from, long to) {

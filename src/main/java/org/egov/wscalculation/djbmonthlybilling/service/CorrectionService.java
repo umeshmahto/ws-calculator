@@ -179,10 +179,8 @@ public class CorrectionService {
 	 * Deactivates the demands that are superseded by an automatic OK-to-OK
 	 * correction before the corrected bill is fetched.
 	 *
-	 * The previous OK demand is still deactivated so that its original assessment
-	 * is not billed again with the consolidated OK-to-OK demand. Its payment,
-	 * however, is NOT treated as a correction credit because that payment belongs
-	 * to the valid previous-OK assessment.
+	 * The previous OK demand remains valid historical billing and is not cancelled
+	 * or treated as a correction credit.
 	 *
 	 * For intervening average/provisional demands, any already-collected amount is
 	 * captured in CorrectionPlan.paidAdjustmentAmount and is represented as a
@@ -194,12 +192,9 @@ public class CorrectionService {
 			throw new IllegalArgumentException("Correction plan is required to deactivate superseded demands");
 		}
 
-		WaterBillingCycle previousOk = billingCycleDao.findById(tenantId, plan.getPreviousOkBillingCycleId());
-
+		// DJB correction cancels only the intervening average/provisional bills.
+		// The previous OK bill is valid historical billing and must remain active.
 		List<WaterBillingCycle> supersededCycles = new ArrayList<>();
-		if (previousOk != null) {
-			supersededCycles.add(previousOk);
-		}
 		if (plan.getCyclesToCorrect() != null) {
 			supersededCycles.addAll(plan.getCyclesToCorrect());
 		}
@@ -358,15 +353,11 @@ public class CorrectionService {
 		List<String> oldBillIds = new ArrayList<>();
 
 		/*
-		 * The previous OK cycle is also superseded by the consolidated OK-to-OK
-		 * correction bill. Keep its demand/bill IDs in the audit trail and mark the
-		 * local cycle as CORRECTED, while retaining the row for history.
+		 * Per DJB automatic-correction rules, only the intervening average/provisional
+		 * cycles are cancelled/replaced. The previous OK cycle remains valid history
+		 * and its demand/bill must not be deactivated or marked CORRECTED.
 		 */
 		List<WaterBillingCycle> supersededCycles = new ArrayList<>();
-		WaterBillingCycle previousOk = billingCycleDao.findById(tenantId, plan.getPreviousOkBillingCycleId());
-		if (previousOk != null) {
-			supersededCycles.add(previousOk);
-		}
 		if (plan.getCyclesToCorrect() != null) {
 			supersededCycles.addAll(plan.getCyclesToCorrect());
 		}
