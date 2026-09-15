@@ -85,6 +85,46 @@ public class DJBMonthlyBillingQueryBuilder {
 		return "SELECT * FROM eg_ws_zroverification WHERE tenantid = ? AND billingcycleid = ?";
 	}
 
+	public String searchPendingZro() {
+		return searchPendingZroBase() + " ORDER BY z.createdtime ASC, z.id ASC LIMIT ? OFFSET ?";
+	}
+
+	public String searchPendingZroByConnection() {
+		return searchPendingZroBase() + " AND z.connectionno = ? ORDER BY z.createdtime ASC, z.id ASC LIMIT ? OFFSET ?";
+	}
+
+	public String countPendingZro() {
+		return countPendingZroBase();
+	}
+
+	public String countPendingZroByConnection() {
+		return countPendingZroBase() + " AND z.connectionno = ?";
+	}
+
+	private String searchPendingZroBase() {
+		return "SELECT "
+				+ "z.id AS zro_id, z.tenantid AS zro_tenantid, z.billingcycleid AS zro_billingcycleid, "
+				+ "z.connectionno AS zro_connectionno, z.consumption AS zro_consumption, "
+				+ "z.previousconsumption AS zro_previousconsumption, z.deviationfactor AS zro_deviationfactor, "
+				+ "z.status AS zro_status, z.remarks AS zro_remarks, z.actionby AS zro_actionby, "
+				+ "z.actiondate AS zro_actiondate, z.createdby AS zro_createdby, z.createdtime AS zro_createdtime, "
+				+ "z.lastmodifiedby AS zro_lastmodifiedby, z.lastmodifiedtime AS zro_lastmodifiedtime, "
+				+ "c.id AS cycle_id, c.billingperiodfrom, c.billingperiodto, c.previousokreading, c.currentreading, "
+				+ "c.readingqualitycode, c.billingbasis, c.actualconsumption, c.onepointfivexflag, "
+				+ "c.status AS cycle_status, c.correctionstatus, c.calculationid, c.demandid, c.billid "
+				+ "FROM eg_ws_zroverification z INNER JOIN eg_ws_billingcycle c "
+				+ "ON c.tenantid = z.tenantid AND c.id = z.billingcycleid "
+				+ "WHERE z.tenantid = ? AND z.status = 'PENDING' AND c.onepointfivexflag = TRUE "
+				+ "AND c.demandid IS NULL AND c.billid IS NULL";
+	}
+
+	private String countPendingZroBase() {
+		return "SELECT COUNT(1) FROM eg_ws_zroverification z INNER JOIN eg_ws_billingcycle c "
+				+ "ON c.tenantid = z.tenantid AND c.id = z.billingcycleid "
+				+ "WHERE z.tenantid = ? AND z.status = 'PENDING' AND c.onepointfivexflag = TRUE "
+				+ "AND c.demandid IS NULL AND c.billid IS NULL";
+	}
+
 	public String insertZro() {
 		return "INSERT INTO eg_ws_zroverification ("
 				+ "id, tenantid, billingcycleid, connectionno, consumption, previousconsumption, deviationfactor, "
