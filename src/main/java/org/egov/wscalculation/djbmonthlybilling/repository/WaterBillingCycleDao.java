@@ -6,33 +6,33 @@ import org.egov.wscalculation.djbmonthlybilling.model.WaterBillingCycle;
 
 public interface WaterBillingCycleDao {
 
-        int save(WaterBillingCycle billingCycle);
+	int save(WaterBillingCycle billingCycle);
 
-        int update(WaterBillingCycle billingCycle);
+	int update(WaterBillingCycle billingCycle);
 
-        WaterBillingCycle findById(String tenantId, String id);
+	WaterBillingCycle findById(String tenantId, String id);
 
-        WaterBillingCycle findByConnectionAndPeriod(String tenantId, String connectionNo,
-                        Long billingPeriodFrom, Long billingPeriodTo);
+	WaterBillingCycle findByConnectionAndPeriod(String tenantId, String connectionNo, Long billingPeriodFrom,
+			Long billingPeriodTo);
 
-        java.util.List<WaterBillingCycle> findOverlappingCycles(String tenantId, String connectionNo,
-                        Long billingPeriodFrom, Long billingPeriodTo);
+	java.util.List<WaterBillingCycle> findOverlappingCycles(String tenantId, String connectionNo,
+			Long billingPeriodFrom, Long billingPeriodTo);
 
-        int lockConnectionForBilling(String tenantId, String connectionNo);
+	int lockConnectionForBilling(String tenantId, String connectionNo);
 
-        WaterBillingCycle findLatestByConnection(String tenantId, String connectionNo);
+	WaterBillingCycle findLatestByConnection(String tenantId, String connectionNo);
 
-        WaterBillingCycle findLatestOkByConnection(String tenantId, String connectionNo);
+	WaterBillingCycle findLatestOkByConnection(String tenantId, String connectionNo);
 
-        List<WaterBillingCycle> findPreviousActualCycles(String tenantId, String connectionNo,
-                        Long beforeBillingPeriodTo, int limit);
+	List<WaterBillingCycle> findPreviousActualCycles(String tenantId, String connectionNo, Long beforeBillingPeriodTo,
+			int limit);
 
-        List<WaterBillingCycle> findCyclesForConnection(String tenantId, String connectionNo,
-                        Long beforeBillingPeriodTo, int limit);
+	List<WaterBillingCycle> findCyclesForConnection(String tenantId, String connectionNo, Long beforeBillingPeriodTo,
+			int limit);
 
-        List<WaterBillingCycle> findCyclesForCorrection(String tenantId, String connectionNo,
-                        Long fromBillingPeriodTo, Long toBillingPeriodTo);
+	List<WaterBillingCycle> findCyclesForCorrection(String tenantId, String connectionNo, Long fromBillingPeriodTo,
+			Long toBillingPeriodTo);
 
-        WaterBillingCycle findPreviousOkByConnectionBefore(String tenantId, String connectionNo,
-                        Long beforeBillingPeriodTo);
+	WaterBillingCycle findPreviousOkByConnectionBefore(String tenantId, String connectionNo,
+			Long beforeBillingPeriodTo);
 }

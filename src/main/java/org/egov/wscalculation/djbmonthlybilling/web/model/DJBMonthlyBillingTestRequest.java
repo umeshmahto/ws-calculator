@@ -2,49 +2,49 @@ package org.egov.wscalculation.djbmonthlybilling.web.model;
 
 import java.math.BigDecimal;
 
-import lombok.Data;
-
 import org.egov.common.contract.request.RequestInfo;
 import org.egov.wscalculation.djbmonthlybilling.model.enums.BillingBasis;
+
+import lombok.Data;
 
 @Data
 public class DJBMonthlyBillingTestRequest {
 
-    private RequestInfo requestInfo;
+	private RequestInfo requestInfo;
 
-    private String tenantId;
-    private String connectionNo;
+	private String tenantId;
+	private String connectionNo;
 
-    private String tariffCategory;
+	private String tariffCategory;
 
-    private BigDecimal consumption;
+	private BigDecimal consumption;
 
-    private BigDecimal previousConsumption;
+	private BigDecimal previousConsumption;
 
-    private BillingBasis billingBasis;
-    private String readingQualityCode;
+	private BillingBasis billingBasis;
+	private String readingQualityCode;
 
-    private boolean waterConnectionAvailable = true;
-    private boolean sewerConnectionAvailable = true;
-    private boolean additionalWaterSource;
+	private boolean waterConnectionAvailable = true;
+	private boolean sewerConnectionAvailable = true;
+	private boolean additionalWaterSource;
 
-    private String consumerCategory;
-    private String propertyUsage;
+	private String consumerCategory;
+	private String propertyUsage;
 
-    private BigDecimal builtUpAreaSqm;
-    private Integer numberOfRooms;
-    private Integer numberOfBeds;
+	private BigDecimal builtUpAreaSqm;
+	private Integer numberOfRooms;
+	private Integer numberOfBeds;
 
-    /*
-     * Free-water rule deliberately receives the eligible monetary base
-     * explicitly. The current rebate service does not infer tax-head scope.
-     */
-    private BigDecimal freeWaterEligibleAmount;
+	/*
+	 * Free-water rule deliberately receives the eligible monetary base explicitly.
+	 * The current rebate service does not infer tax-head scope.
+	 */
+	private BigDecimal freeWaterEligibleAmount;
 
-    private boolean bulkConnection;
-    private Integer dwellingUnitCount;
-    private boolean functionalRwh;
-    private boolean functionalWastewaterRecycling;
-    private boolean djbEmployeeEligible;
-    private Integer eligibleConnectionCount;
+	private boolean bulkConnection;
+	private Integer dwellingUnitCount;
+	private boolean functionalRwh;
+	private boolean functionalWastewaterRecycling;
+	private boolean djbEmployeeEligible;
+	private Integer eligibleConnectionCount;
 }

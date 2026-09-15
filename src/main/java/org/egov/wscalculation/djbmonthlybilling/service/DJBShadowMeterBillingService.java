@@ -208,7 +208,8 @@ public class DJBShadowMeterBillingService {
 		/*
 		 * A flagged 1.5x cycle must not create an automatic correction plan before ZRO
 		 * approves it. We still call the demand service: it owns the ZRO gate and will
-		 * persist the auditable ZRO-pending calculation snapshot without creating demand.
+		 * persist the auditable ZRO-pending calculation snapshot without creating
+		 * demand.
 		 */
 		boolean zroDecisionPending = Boolean.TRUE.equals(cycle.getOnepointfivexflag())
 				&& !org.egov.wscalculation.djbmonthlybilling.model.enums.ZroStatus.APPROVED
@@ -336,11 +337,9 @@ public class DJBShadowMeterBillingService {
 		}
 
 		WaterBillingCycle overlap = overlaps.get(0);
-		throw new IllegalStateException(
-				"Billing period overlaps an existing billing cycle. Existing period: "
-						+ overlap.getBillingperiodfrom() + "-" + overlap.getBillingperiodto()
-						+ ", requested period: " + from + "-" + to
-						+ ". Existing cycle: " + overlap.getId());
+		throw new IllegalStateException("Billing period overlaps an existing billing cycle. Existing period: "
+				+ overlap.getBillingperiodfrom() + "-" + overlap.getBillingperiodto() + ", requested period: " + from
+				+ "-" + to + ". Existing cycle: " + overlap.getId());
 	}
 
 	/**
@@ -348,9 +347,9 @@ public class DJBShadowMeterBillingService {
 	 *
 	 * The transaction takes a PostgreSQL advisory lock for tenant+connection,
 	 * checks exact/finalized duplicates and interval overlap, then inserts a
-	 * CREATED reservation when necessary. No additional table is required.
-	 * Because the reservation survives after the short transaction, a later retry
-	 * can continue the same incomplete cycle if Kafka/external billing fails.
+	 * CREATED reservation when necessary. No additional table is required. Because
+	 * the reservation survives after the short transaction, a later retry can
+	 * continue the same incomplete cycle if Kafka/external billing fails.
 	 */
 	public void prepareBillingCycleReservation(MeterReading reading, RequestInfo requestInfo) {
 		validateMeterReadingOrder(reading);
@@ -372,8 +371,8 @@ public class DJBShadowMeterBillingService {
 				if (StringUtils.hasText(existing.getBillid())
 						|| BillingCycleStatus.BILL_GENERATED.equals(existing.getStatus())) {
 					throw new IllegalStateException(
-							"A billing cycle with the same connection and period is already billed: "
-									+ existing.getId() + ". Use correction/revision flow instead.");
+							"A billing cycle with the same connection and period is already billed: " + existing.getId()
+									+ ". Use correction/revision flow instead.");
 				}
 				// Existing non-finalized cycle is a recoverable reservation.
 				reading.setBillingCycleId(existing.getId());
@@ -411,12 +410,10 @@ public class DJBShadowMeterBillingService {
 			throw new IllegalArgumentException("Last/current reading and dates are required");
 		}
 		if (reading.getCurrentReadingDate() < reading.getLastReadingDate()) {
-			throw new IllegalArgumentException(
-					"Current reading date cannot be earlier than last reading date");
+			throw new IllegalArgumentException("Current reading date cannot be earlier than last reading date");
 		}
 		if (reading.getCurrentReading() < reading.getLastReading()) {
-			throw new IllegalArgumentException(
-					"Current meter reading cannot be less than last meter reading");
+			throw new IllegalArgumentException("Current meter reading cannot be less than last meter reading");
 		}
 	}
 

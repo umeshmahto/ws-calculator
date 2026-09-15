@@ -155,6 +155,10 @@ public class ZroVerificationService {
 			cycle.setZroremarks(finalRemarks);
 			cycle.setZroactionby(actor);
 			cycle.setZroactiondate(now);
+			// A ZRO rejection converts the billing cycle from ACTUAL to DJB PROVISIONAL.
+			// Set this state before invoking the downstream demand service so the cycle
+			// remains correct even when the demand service is retried or mocked in tests.
+			cycle.setBillingbasis(org.egov.wscalculation.djbmonthlybilling.model.enums.BillingBasis.PROVISIONAL);
 			cycle.setStatus(BillingCycleStatus.CALCULATED);
 			cycle.setLastmodifiedby(actor);
 			cycle.setLastmodifiedtime(now);
