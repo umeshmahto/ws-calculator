@@ -70,7 +70,9 @@ public class DJBMonthlyBillingStatement {
 		private Long currentReadingDate;
 		private BigDecimal previousConsumption;
 		private BigDecimal actualConsumption;
+		private BigDecimal monthlyConsumption;
 		private BigDecimal billingConsumption;
+		private BigDecimal billingDays;
 		private BigDecimal averageConsumption;
 		private BigDecimal deviationFactor;
 		private String unit;
@@ -104,6 +106,8 @@ public class DJBMonthlyBillingStatement {
 		private BigDecimal previousConsumption;
 		private BigDecimal thresholdConsumption;
 		private BigDecimal actualConsumption;
+		private BigDecimal monthlyConsumption;
+		private BigDecimal billingDays;
 		private boolean exceeded;
 		private BigDecimal minimumZroConsumption;
 		private boolean zroRequired;

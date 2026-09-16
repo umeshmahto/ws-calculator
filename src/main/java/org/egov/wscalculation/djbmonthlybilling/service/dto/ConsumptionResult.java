@@ -11,6 +11,7 @@ public class ConsumptionResult {
     private BigDecimal averageConsumption;
     private BigDecimal billingConsumption;
     private BigDecimal previousConsumption;
+    private BigDecimal monthlyConsumption;
     private BigDecimal deviationFactor;
     private boolean onePointFiveX;
 }

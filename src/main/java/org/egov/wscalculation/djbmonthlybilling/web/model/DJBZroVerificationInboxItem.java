@@ -21,6 +21,8 @@ public class DJBZroVerificationInboxItem {
     private String readingQualityCode;
     private String billingBasis;
     private BigDecimal actualConsumption;
+    private BigDecimal monthlyConsumption;
+    private BigDecimal billingDays;
     private BigDecimal thresholdConsumption;
     private Boolean onePointFiveXFlag;
     private String billingCycleStatus;

@@ -84,6 +84,8 @@ public class BillingBasisService {
 		if (cycles == null || cycles.isEmpty()) {
 			return null;
 		}
-		return cycles.get(0).getBillingconsumption();
+		WaterBillingCycle previous = cycles.get(0);
+        return DJBConsumptionPeriodUtil.toMonthlyConsumption(previous.getBillingconsumption(),
+                previous.getBillingperiodfrom(), previous.getBillingperiodto());
 	}
 }

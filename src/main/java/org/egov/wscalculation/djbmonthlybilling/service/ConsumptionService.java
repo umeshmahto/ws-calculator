@@ -28,10 +28,15 @@ public class ConsumptionService {
 
 		if (BillingBasis.ACTUAL.equals(decision.getBillingBasis())) {
 			BigDecimal actual = calculateActualConsumption(currentCycle);
-			return ConsumptionResult.builder().actualConsumption(actual).billingConsumption(actual)
-					.previousConsumption(decision.getPreviousConsumption())
-					.deviationFactor(calculateDeviation(actual, decision.getPreviousConsumption()))
-					.onePointFiveX(isOnePointFiveX(actual, decision.getPreviousConsumption(), rule)).build();
+            BigDecimal monthlyConsumption = DJBConsumptionPeriodUtil.toMonthlyConsumption(actual,
+                    currentCycle.getBillingperiodfrom(), currentCycle.getBillingperiodto());
+            BigDecimal previousMonthlyConsumption = decision.getPreviousConsumption();
+            boolean onePointFiveX = isOnePointFiveX(monthlyConsumption, previousMonthlyConsumption, rule);
+
+            return ConsumptionResult.builder().actualConsumption(actual).billingConsumption(actual)
+                    .previousConsumption(previousMonthlyConsumption).monthlyConsumption(monthlyConsumption)
+                    .deviationFactor(calculateDeviation(monthlyConsumption, previousMonthlyConsumption))
+                    .onePointFiveX(onePointFiveX).build();
 		}
 
 		BigDecimal average = calculateHistoricalAverage(tenantId, connectionNo, currentCycle.getBillingperiodto(),

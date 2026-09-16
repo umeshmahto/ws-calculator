@@ -121,10 +121,13 @@ public class DJBMonthlyBillingCalculationSnapshotService {
 		BigDecimal multiplier = billingRule != null && billingRule.getHighConsumptionMultiplier() != null
 				? BigDecimal.valueOf(billingRule.getHighConsumptionMultiplier())
 				: new BigDecimal("1.5");
+		BigDecimal billingDays = DJBConsumptionPeriodUtil.calculateElapsedDays(cycle.getBillingperiodfrom(), cycle.getBillingperiodto());
+		BigDecimal monthlyConsumption = DJBConsumptionPeriodUtil.toMonthlyConsumption(cycle.getActualconsumption(),
+				cycle.getBillingperiodfrom(), cycle.getBillingperiodto());
 		BigDecimal threshold = cycle.getPreviousconsumption() == null ? null
 				: cycle.getPreviousconsumption().multiply(multiplier);
-		boolean exceeded = threshold != null && cycle.getActualconsumption() != null
-				&& cycle.getActualconsumption().compareTo(threshold) > 0;
+		boolean exceeded = threshold != null && monthlyConsumption != null
+				&& monthlyConsumption.compareTo(threshold) > 0;
 		BigDecimal minimumZroConsumption = billingRule != null && billingRule.getHighConsumptionThresholdKl() != null
 				? BigDecimal.valueOf(billingRule.getHighConsumptionThresholdKl().longValue())
 				: new BigDecimal("20");
@@ -150,7 +153,8 @@ public class DJBMonthlyBillingCalculationSnapshotService {
 						.currentReadingDate(cycle.getCurrentreadingdate())
 						.previousConsumption(cycle.getPreviousconsumption())
 						.actualConsumption(cycle.getActualconsumption())
-						.billingConsumption(cycle.getBillingconsumption())
+						.monthlyConsumption(monthlyConsumption)
+						.billingConsumption(cycle.getBillingconsumption()).billingDays(billingDays)
 						.averageConsumption(cycle.getAverageconsumption()).deviationFactor(cycle.getDeviationfactor())
 						.unit("KL").build())
 				.billingDecision(DJBMonthlyBillingStatement.BillingDecision.builder()
@@ -172,11 +176,12 @@ public class DJBMonthlyBillingCalculationSnapshotService {
 								billingRule == null ? null : billingRule.getProvisionalMaximumCycles())
 						.build())
 				.onePointFiveX(DJBMonthlyBillingStatement.OnePointFiveX.builder()
-						.evaluated(cycle.getPreviousconsumption() != null && cycle.getActualconsumption() != null)
+						.evaluated(cycle.getPreviousconsumption() != null && monthlyConsumption != null)
 						.multiplier(multiplier).previousConsumption(cycle.getPreviousconsumption())
 						.thresholdConsumption(threshold).actualConsumption(cycle.getActualconsumption())
+						.monthlyConsumption(monthlyConsumption).billingDays(billingDays)
 						.exceeded(exceeded).minimumZroConsumption(minimumZroConsumption).zroRequired(true)
-						.reason("Actual consumption exceeds the configured 1.5x threshold and is at/above the ZRO minimum; verification is pending.")
+						.reason("Monthly-equivalent consumption exceeds the configured 1.5x threshold and is at/above the ZRO minimum; verification is pending.")
 						.build())
 				.charges(null)
 				.adjustments(DJBMonthlyBillingStatement.Adjustments.builder()
@@ -258,12 +263,12 @@ public class DJBMonthlyBillingCalculationSnapshotService {
 		BigDecimal multiplier = billingRule != null && billingRule.getHighConsumptionMultiplier() != null
 				? BigDecimal.valueOf(billingRule.getHighConsumptionMultiplier())
 				: new BigDecimal("1.5");
-		BigDecimal threshold = null;
-		boolean onePointFiveExceeded = false;
-		if (cycle.getPreviousconsumption() != null && cycle.getActualconsumption() != null) {
-			threshold = cycle.getPreviousconsumption().multiply(multiplier);
-			onePointFiveExceeded = cycle.getActualconsumption().compareTo(threshold) > 0;
-		}
+		BigDecimal billingDays = DJBConsumptionPeriodUtil.calculateElapsedDays(cycle.getBillingperiodfrom(), cycle.getBillingperiodto());
+		BigDecimal monthlyConsumption = DJBConsumptionPeriodUtil.toMonthlyConsumption(cycle.getActualconsumption(),
+				cycle.getBillingperiodfrom(), cycle.getBillingperiodto());
+		BigDecimal threshold = cycle.getPreviousconsumption() == null ? null
+				: cycle.getPreviousconsumption().multiply(multiplier);
+		boolean onePointFiveExceeded = Boolean.TRUE.equals(cycle.getOnepointfivexflag());
 		BigDecimal minimumZroConsumption = billingRule != null && billingRule.getHighConsumptionThresholdKl() != null
 				? BigDecimal.valueOf(billingRule.getHighConsumptionThresholdKl().longValue())
 				: new BigDecimal("20");
@@ -357,7 +362,8 @@ public class DJBMonthlyBillingCalculationSnapshotService {
 						.currentReadingDate(cycle.getCurrentreadingdate())
 						.previousConsumption(cycle.getPreviousconsumption())
 						.actualConsumption(cycle.getActualconsumption())
-						.billingConsumption(cycle.getBillingconsumption())
+						.monthlyConsumption(monthlyConsumption)
+						.billingConsumption(cycle.getBillingconsumption()).billingDays(billingDays)
 						.averageConsumption(cycle.getAverageconsumption()).deviationFactor(cycle.getDeviationfactor())
 						.unit("KL").build())
 				.billingDecision(DJBMonthlyBillingStatement.BillingDecision.builder().basis(billingBasis)
@@ -373,9 +379,10 @@ public class DJBMonthlyBillingCalculationSnapshotService {
 								billingRule == null ? null : billingRule.getProvisionalMaximumCycles())
 						.build())
 				.onePointFiveX(DJBMonthlyBillingStatement.OnePointFiveX.builder()
-						.evaluated(cycle.getPreviousconsumption() != null && cycle.getActualconsumption() != null)
+						.evaluated(cycle.getPreviousconsumption() != null && monthlyConsumption != null)
 						.multiplier(multiplier).previousConsumption(cycle.getPreviousconsumption())
 						.thresholdConsumption(threshold).actualConsumption(cycle.getActualconsumption())
+						.monthlyConsumption(monthlyConsumption).billingDays(billingDays)
 						.exceeded(onePointFiveExceeded).minimumZroConsumption(minimumZroConsumption)
 						.zroRequired(zroRequired).reason(buildOnePointFiveReason(cycle, threshold, zroRequired))
 						.build())
@@ -521,8 +528,9 @@ public class DJBMonthlyBillingCalculationSnapshotService {
 	}
 
 	private String buildOnePointFiveReason(WaterBillingCycle cycle, BigDecimal threshold, boolean zroRequired) {
-		if (cycle.getActualconsumption() == null || cycle.getPreviousconsumption() == null) {
-			return "1.5x comparison could not be evaluated because previous or actual consumption is unavailable.";
+		BigDecimal currentMonthly = monthlyConsumption(cycle);
+		if (currentMonthly == null || cycle.getPreviousconsumption() == null) {
+			return "1.5x comparison could not be evaluated because monthly-equivalent consumption or previous monthly consumption is unavailable.";
 		}
 		if (!Boolean.TRUE.equals(cycle.getOnepointfivexflag())) {
 			return "Actual consumption did not trigger the DJB 1.5x rule.";
@@ -531,8 +539,13 @@ public class DJBMonthlyBillingCalculationSnapshotService {
 			return cycle.getActualconsumption() + " KL exceeds 1.5 x previous consumption (" + threshold
 					+ " KL) and requires ZRO verification.";
 		}
-		return cycle.getActualconsumption()
-				+ " KL exceeded the 1.5 x comparison, but the current cycle does not require ZRO blocking.";
+		return monthlyConsumption(cycle)
+				+ " KL/month exceeded the 1.5 x comparison, but the current cycle does not require ZRO blocking.";
+	}
+
+	private BigDecimal monthlyConsumption(WaterBillingCycle cycle) {
+		return DJBConsumptionPeriodUtil.toMonthlyConsumption(cycle.getActualconsumption(),
+				cycle.getBillingperiodfrom(), cycle.getBillingperiodto());
 	}
 
 	private String actor(RequestInfo requestInfo) {
