@@ -96,20 +96,39 @@ class DJBMonthlyBillingCalculationSnapshotServiceTest {
 	}
 
 	@Test
-	void shouldReuseExistingSnapshotWhenCycleRetryOccurs() throws Exception {
+	void shouldRefreshExistingSnapshotWhenCycleRetryCompletesBilling() throws Exception {
 		WaterBillingCycle cycle = validCycle();
+		cycle.setDemandid("DEMAND-1");
+		cycle.setBillid("BILL-1");
 		DJBMonthlyBillingCalculation existing = DJBMonthlyBillingCalculation.builder()
 				.id("CALC-EXISTING").tenantid("dl.djb").billingcycleid(cycle.getId())
 				.build();
 
 		when(calculationDao.findByBillingCycle("dl.djb", cycle.getId())).thenReturn(existing);
+		when(calculationDao.updateSnapshot(org.mockito.ArgumentMatchers.eq("dl.djb"),
+				org.mockito.ArgumentMatchers.eq("CALC-EXISTING"), org.mockito.ArgumentMatchers.eq("BILL_GENERATED"),
+				org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString()))
+				.thenReturn(1);
 
-		String calculationId = service.persist(new RequestInfo(), cycle, new WaterConnection(), new Property(), null,
-				null, RebateCalculationResult.builder().totalRebate(BigDecimal.ZERO).rebateItems(Collections.emptyList()).build(),
-				null, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, Collections.<String>emptyList(), BigDecimal.ZERO);
+		TariffCalculationResult water = TariffCalculationResult.builder().tariffId("DOMESTIC").category("DOMESTIC")
+				.consumption(new BigDecimal("45")).waterVolumetricCharge(new BigDecimal("150"))
+				.serviceCharge(new BigDecimal("200")).totalWaterCharge(new BigDecimal("350"))
+				.slabCharges(Collections.emptyList()).build();
+		SewerageCalculationResult sewerage = SewerageCalculationResult.builder()
+				.regularSewerageCharge(new BigDecimal("90")).additionalSewerageCharge(BigDecimal.ZERO)
+				.totalSewerageCharge(new BigDecimal("90")).build();
+		RebateCalculationResult rebate = RebateCalculationResult.builder().totalRebate(BigDecimal.ZERO)
+				.rebateItems(Collections.emptyList()).build();
+
+		String calculationId = service.persist(new RequestInfo(), cycle, new WaterConnection(), new Property(), water,
+				sewerage, rebate, null, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO,
+				Collections.<String>emptyList(), new BigDecimal("440"));
 
 		assertEquals("CALC-EXISTING", calculationId);
 		verify(calculationDao).findByBillingCycle("dl.djb", cycle.getId());
+		verify(calculationDao).updateSnapshot(org.mockito.ArgumentMatchers.eq("dl.djb"),
+				org.mockito.ArgumentMatchers.eq("CALC-EXISTING"), org.mockito.ArgumentMatchers.eq("BILL_GENERATED"),
+				org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString());
 	}
 
 	@Test

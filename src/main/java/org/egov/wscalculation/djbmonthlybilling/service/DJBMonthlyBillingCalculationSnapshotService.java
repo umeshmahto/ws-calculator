@@ -50,18 +50,22 @@ public class DJBMonthlyBillingCalculationSnapshotService {
 			BigDecimal residualPaidCredit, BigDecimal carriedForwardCreditApplied,
 			List<String> carriedForwardCreditAllocationIds, BigDecimal netAmount) {
 
-		// Retry safety: if the snapshot was already inserted but the billing-cycle
-		// reference update failed, reuse the existing snapshot instead of attempting
-		// a second INSERT against the unique (tenantid, billingcycleid) key.
+		DJBMonthlyBillingCalculation existing = null;
 		if (cycle != null && StringUtils.hasText(cycle.getId())) {
-			DJBMonthlyBillingCalculation existing = calculationDao.findByBillingCycle(
-					cycle.getTenantid(), cycle.getId());
-			if (existing != null && StringUtils.hasText(existing.getId())) {
-				return existing.getId();
-			}
+			existing = calculationDao.findByBillingCycle(cycle.getTenantid(), cycle.getId());
 		}
 
-		String calculationId = UUID.randomUUID().toString();
+		/*
+		 * A ZRO-pending cycle already has a snapshot with charges=null. Once ZRO
+		 * approves the cycle, the normal demand path calculates water/sewerage/rebates
+		 * and comes back here. Reusing only the calculation id is not enough: the
+		 * persisted snapshot must also be replaced with the final calculated statement.
+		 * Otherwise the fetch API will correctly read the old ZRO_PENDING snapshot and
+		 * expose charges=null even though the demand/bill was generated successfully.
+		 */
+		String calculationId = existing != null && StringUtils.hasText(existing.getId())
+				? existing.getId()
+				: UUID.randomUUID().toString();
 		long now = System.currentTimeMillis();
 
 		DJBMonthlyBillingStatement statement = buildStatement(cycle, connection, property, water, sewerage, rebate,
@@ -76,12 +80,21 @@ public class DJBMonthlyBillingCalculationSnapshotService {
 					ex);
 		}
 
+		String finalStatus = StringUtils.hasText(cycle.getBillid())
+				? "BILL_GENERATED"
+				: (StringUtils.hasText(cycle.getDemandid()) ? "DEMAND_CREATED" : "CALCULATED");
+
 		DJBMonthlyBillingCalculation calculation = DJBMonthlyBillingCalculation.builder().id(calculationId)
 				.tenantid(cycle.getTenantid()).billingcycleid(cycle.getId()).connectionno(cycle.getConnectionno())
-				.engineversion(ENGINE_VERSION).status("CALCULATED").calculatedtime(now).calculatedby(actor(requestInfo))
+				.engineversion(ENGINE_VERSION).status(finalStatus).calculatedtime(now).calculatedby(actor(requestInfo))
 				.snapshotjson(snapshotJson).build();
 
-		if (calculationDao.save(calculation) != 1) {
+		if (existing != null && StringUtils.hasText(existing.getId())) {
+			if (calculationDao.updateSnapshot(cycle.getTenantid(), calculationId, finalStatus, now,
+					actor(requestInfo), snapshotJson) != 1) {
+				throw new IllegalStateException("Failed to refresh DJB billing calculation snapshot for " + cycle.getId());
+			}
+		} else if (calculationDao.save(calculation) != 1) {
 			throw new IllegalStateException("Failed to persist DJB billing calculation snapshot for " + cycle.getId());
 		}
 

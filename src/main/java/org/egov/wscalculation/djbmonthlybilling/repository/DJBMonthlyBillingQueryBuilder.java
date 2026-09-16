@@ -241,6 +241,10 @@ public class DJBMonthlyBillingQueryBuilder {
 		return "UPDATE eg_ws_billingcalculation SET status = ? WHERE tenantid = ? AND id = ?";
 	}
 
+	public String updateBillingCalculationSnapshot() {
+		return "UPDATE eg_ws_billingcalculation SET status = ?, calculatedtime = ?, calculatedby = ?, snapshotjson = ? WHERE tenantid = ? AND id = ?";
+	}
+
 	public String insertBillingCalculation() {
 		return "INSERT INTO eg_ws_billingcalculation (id, tenantid, billingcycleid, connectionno, engineversion, status, calculatedtime, calculatedby, snapshotjson) "
 				+ "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)";

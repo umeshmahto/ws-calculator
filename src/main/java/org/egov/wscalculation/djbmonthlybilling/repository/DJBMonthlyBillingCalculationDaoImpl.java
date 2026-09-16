@@ -34,6 +34,12 @@ public class DJBMonthlyBillingCalculationDaoImpl implements DJBMonthlyBillingCal
     }
 
     @Override
+    public int updateSnapshot(String tenantId, String id, String status, long calculatedTime, String calculatedBy, String snapshotJson) {
+        return jdbcTemplate.update(queryBuilder.updateBillingCalculationSnapshot(),
+                status, calculatedTime, calculatedBy, snapshotJson, tenantId, id);
+    }
+
+    @Override
     public DJBMonthlyBillingCalculation findById(String tenantId, String id) {
         List<DJBMonthlyBillingCalculation> result = jdbcTemplate.query(
                 queryBuilder.findBillingCalculationById(), rowMapper, tenantId, id);
