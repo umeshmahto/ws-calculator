@@ -109,7 +109,7 @@ public class DJBMonthlyBillingQueryBuilder {
 				+ "z.status AS zro_status, z.remarks AS zro_remarks, z.actionby AS zro_actionby, "
 				+ "z.actiondate AS zro_actiondate, z.createdby AS zro_createdby, z.createdtime AS zro_createdtime, "
 				+ "z.lastmodifiedby AS zro_lastmodifiedby, z.lastmodifiedtime AS zro_lastmodifiedtime, "
-				+ "c.id AS cycle_id, c.billingperiodfrom, c.billingperiodto, c.previousokreading, c.currentreading, "
+				+ "c.id AS cycle_id, c.billingperiodfrom, c.billingperiodto, c.previousokreading, c.previousokreadingdate, c.currentreading, "
 				+ "c.readingqualitycode, c.billingbasis, c.actualconsumption, c.onepointfivexflag, "
 				+ "c.status AS cycle_status, c.correctionstatus, c.calculationid, c.demandid, c.billid "
 				+ "FROM eg_ws_zroverification z INNER JOIN eg_ws_billingcycle c "

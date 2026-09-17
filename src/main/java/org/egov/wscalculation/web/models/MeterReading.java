@@ -290,9 +290,7 @@ public class MeterReading {
 	 *
 	 * @return currentReading
 	 **/
-	@ApiModelProperty(required = true, value = "Current Reading")
-	@NotNull
-
+	@ApiModelProperty(value = "Current Reading. Nullable for DJB average-billing reading quality codes such as MLOC.")
 	public Double getCurrentReading() {
 		return currentReading;
 	}

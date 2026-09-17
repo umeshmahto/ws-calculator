@@ -77,15 +77,16 @@ public class WSCalculationValidator {
 		MeterReadingSearchCriteria criteria = MeterReadingSearchCriteria.builder().
 				connectionNos(connectionNos).tenantId(meterReading.getTenantId()).build();
 		List<MeterReading> previousMeterReading = wSCalculationDao.searchCurrentMeterReadings(criteria);
-		if (!CollectionUtils.isEmpty(previousMeterReading)) {
+		if (meterReading.getCurrentReading() != null && !CollectionUtils.isEmpty(previousMeterReading)) {
 			Double currentMeterReading = previousMeterReading.get(0).getCurrentReading();
-			if (meterReading.getCurrentReading() < currentMeterReading) {
+			if (currentMeterReading != null && meterReading.getCurrentReading() < currentMeterReading) {
 				errorMap.put("INVALID_METER_READING_CONNECTION_NUMBER",
 						"Current meter reading has to be greater than the past last readings in the meter reading!");
 			}
 		}
 
-		if (meterReading.getCurrentReading() < meterReading.getLastReading()) {
+		if (meterReading.getCurrentReading() != null && meterReading.getLastReading() != null
+				&& meterReading.getCurrentReading() < meterReading.getLastReading()) {
 			errorMap.put("INVALID_METER_READING_LAST_READING",
 					"Current Meter Reading cannot be less than last meter reading");
 		}
@@ -94,7 +95,7 @@ public class WSCalculationValidator {
 			errorMap.put("INVALID_METER_READING_STATUS", "Meter status can not be null");
 		}
 
-		if (isUpdate && (meterReading.getCurrentReading() == null)) {
+		if (isUpdate && requiresCurrentReading(meterReading) && (meterReading.getCurrentReading() == null)) {
 			errorMap.put("INVALID_CURRENT_METER_READING",
 					"Current Meter Reading cannot be update without current meter reading");
 		}
@@ -150,9 +151,9 @@ public class WSCalculationValidator {
 		MeterReadingSearchCriteria criteria = MeterReadingSearchCriteria.builder().
 				connectionNos(connectionNos).tenantId(meterReading.getTenantId()).build();
 		List<MeterReading> previousMeterReading = wSCalculationDao.searchCurrentMeterReadings(criteria);
-		if (!CollectionUtils.isEmpty(previousMeterReading)) {
+		if (meterReading.getCurrentReading() != null && !CollectionUtils.isEmpty(previousMeterReading)) {
 			Double currentMeterReading = previousMeterReading.get(0).getCurrentReading();
-			if (meterReading.getCurrentReading() < currentMeterReading) {
+			if (currentMeterReading != null && meterReading.getCurrentReading() < currentMeterReading) {
 				
 				errorMessage=errorMessage.equalsIgnoreCase("")?errorMessage.concat("Current meter reading has to be greater than the past last readings in the meter reading!"):errorMessage.concat(", Current meter reading has to be greater than the past last readings in the meter reading!");
 
@@ -161,7 +162,8 @@ public class WSCalculationValidator {
 			}
 		}
 
-		if (meterReading.getCurrentReading() < meterReading.getLastReading()) {
+		if (meterReading.getCurrentReading() != null && meterReading.getLastReading() != null
+				&& meterReading.getCurrentReading() < meterReading.getLastReading()) {
 			errorMessage=errorMessage.equalsIgnoreCase("")?errorMessage.concat("Current Meter Reading cannot be less than last meter reading"):
 				errorMessage.concat(", Current Meter Reading cannot be less than last meter reading");
 
@@ -175,7 +177,7 @@ public class WSCalculationValidator {
 			errorMap.put("INVALID_METER_READING_STATUS", "Meter status can not be null");
 		}
 
-		if (isUpdate && (meterReading.getCurrentReading() == null)) {
+		if (isUpdate && requiresCurrentReading(meterReading) && (meterReading.getCurrentReading() == null)) {
 			errorMessage=errorMessage.equalsIgnoreCase("")?errorMessage.concat("Current Meter Reading cannot be update without current meter reading"):
 				errorMessage.concat(", Current Meter Reading cannot be update without current meter reading");
 			errorMap.put("INVALID_CURRENT_METER_READING",
@@ -213,6 +215,15 @@ public class WSCalculationValidator {
 		return true;
 	}
 	
+	private boolean requiresCurrentReading(MeterReading meterReading) {
+		if (meterReading == null || StringUtils.isEmpty(meterReading.getReadingQualityCode())) {
+			return true;
+		}
+		String code = meterReading.getReadingQualityCode();
+		return !("MLOC".equalsIgnoreCase(code) || "PLOC".equalsIgnoreCase(code)
+				|| "RDDT".equalsIgnoreCase(code) || "ADF".equalsIgnoreCase(code));
+	}
+
 	/**
 	 * Billing Period Validation
 	 */

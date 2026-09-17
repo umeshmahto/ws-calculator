@@ -63,10 +63,12 @@ public class DJBZroVerificationInboxService {
 
     private DJBZroVerificationInboxItem toInboxItem(ZroVerificationInboxRecord record) {
         ZroVerification verification = record.getVerification();
+        Long normalizationFrom = DJBConsumptionPeriodUtil.resolveNormalizationStart(
+                record.getPreviousokreadingdate(), record.getBillingperiodfrom());
         java.math.BigDecimal monthlyConsumption = DJBConsumptionPeriodUtil.toMonthlyConsumption(
-                record.getActualconsumption(), record.getBillingperiodfrom(), record.getBillingperiodto());
+                record.getActualconsumption(), normalizationFrom, record.getBillingperiodto());
         java.math.BigDecimal billingDays = DJBConsumptionPeriodUtil.calculateElapsedDays(
-                record.getBillingperiodfrom(), record.getBillingperiodto());
+                normalizationFrom, record.getBillingperiodto());
 
         return DJBZroVerificationInboxItem.builder()
                 .verification(verification)
@@ -75,6 +77,7 @@ public class DJBZroVerificationInboxService {
                 .billingPeriodFrom(record.getBillingperiodfrom())
                 .billingPeriodTo(record.getBillingperiodto())
                 .previousReading(record.getPreviousreading())
+                .previousOkReadingDate(record.getPreviousokreadingdate())
                 .currentReading(record.getCurrentreading())
                 .readingQualityCode(record.getReadingqualitycode())
                 .billingBasis(record.getBillingbasis())

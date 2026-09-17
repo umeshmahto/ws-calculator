@@ -38,6 +38,7 @@ public class ZroVerificationInboxRowMapper implements RowMapper<ZroVerificationI
         r.setBillingperiodfrom(rs.getLong("billingperiodfrom"));
         r.setBillingperiodto(rs.getLong("billingperiodto"));
         r.setPreviousreading(rs.getBigDecimal("previousokreading"));
+        r.setPreviousokreadingdate(nullableLong(rs, "previousokreadingdate"));
         r.setCurrentreading(rs.getBigDecimal("currentreading"));
         r.setReadingqualitycode(rs.getString("readingqualitycode"));
         r.setBillingbasis(rs.getString("billingbasis"));

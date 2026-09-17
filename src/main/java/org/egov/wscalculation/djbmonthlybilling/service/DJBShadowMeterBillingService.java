@@ -135,7 +135,7 @@ public class DJBShadowMeterBillingService {
 
 		cycle.setMeterreadingid(reading.getId());
 		cycle.setReadingqualitycode(reading.getReadingQualityCode());
-		cycle.setCurrentreading(BigDecimal.valueOf(reading.getCurrentReading()));
+		cycle.setCurrentreading(reading.getCurrentReading() == null ? null : BigDecimal.valueOf(reading.getCurrentReading()));
 		cycle.setCurrentreadingdate(reading.getCurrentReadingDate());
 
 		WaterBillingCycle previousOk = billingCycleDao.findPreviousOkByConnectionBefore(tenantId, connectionNo, to);
@@ -389,7 +389,7 @@ public class DJBShadowMeterBillingService {
 			reservation.setBillingperiodto(to);
 			reservation.setMeterreadingid(reading.getId());
 			reservation.setReadingqualitycode(reading.getReadingQualityCode());
-			reservation.setCurrentreading(BigDecimal.valueOf(reading.getCurrentReading()));
+			reservation.setCurrentreading(reading.getCurrentReading() == null ? null : BigDecimal.valueOf(reading.getCurrentReading()));
 			reservation.setCurrentreadingdate(reading.getCurrentReadingDate());
 			reservation.setOnepointfivexflag(false);
 			reservation.setAveragecyclecount(0);
@@ -405,16 +405,28 @@ public class DJBShadowMeterBillingService {
 	}
 
 	private void validateMeterReadingOrder(MeterReading reading) {
-		if (reading.getLastReadingDate() == null || reading.getCurrentReadingDate() == null
-				|| reading.getLastReading() == null || reading.getCurrentReading() == null) {
-			throw new IllegalArgumentException("Last/current reading and dates are required");
+		if (reading == null || reading.getLastReadingDate() == null || reading.getCurrentReadingDate() == null
+				|| reading.getLastReading() == null) {
+			throw new IllegalArgumentException("Last reading and reading dates are required");
 		}
 		if (reading.getCurrentReadingDate() < reading.getLastReadingDate()) {
 			throw new IllegalArgumentException("Current reading date cannot be earlier than last reading date");
 		}
+		if (reading.getCurrentReading() == null) {
+			if (!allowsNullCurrentReading(reading.getReadingQualityCode())) {
+				throw new IllegalArgumentException("Current reading is required for reading quality code: "
+						+ reading.getReadingQualityCode());
+			}
+			return;
+		}
 		if (reading.getCurrentReading() < reading.getLastReading()) {
 			throw new IllegalArgumentException("Current meter reading cannot be less than last meter reading");
 		}
+	}
+
+	private boolean allowsNullCurrentReading(String readingQualityCode) {
+		return "MLOC".equalsIgnoreCase(readingQualityCode) || "PLOC".equalsIgnoreCase(readingQualityCode)
+				|| "RDDT".equalsIgnoreCase(readingQualityCode) || "ADF".equalsIgnoreCase(readingQualityCode);
 	}
 
 	/**
@@ -446,9 +458,15 @@ public class DJBShadowMeterBillingService {
 			throw new IllegalArgumentException("DJB shadow API only supports tenant dl.djb");
 		}
 
-		if (reading.getCurrentReading() == null || reading.getCurrentReadingDate() == null
-				|| reading.getLastReading() == null || reading.getLastReadingDate() == null) {
-			throw new IllegalArgumentException("last/current reading and dates are required");
+		if (reading.getCurrentReadingDate() == null || reading.getLastReading() == null
+				|| reading.getLastReadingDate() == null) {
+			throw new IllegalArgumentException("last reading and dates are required");
+		}
+
+		if (reading.getCurrentReading() == null
+				&& !allowsNullCurrentReading(reading.getReadingQualityCode())) {
+			throw new IllegalArgumentException("current reading is required for reading quality code: "
+					+ reading.getReadingQualityCode());
 		}
 
 		if (reading.getReadingQualityCode() == null) {

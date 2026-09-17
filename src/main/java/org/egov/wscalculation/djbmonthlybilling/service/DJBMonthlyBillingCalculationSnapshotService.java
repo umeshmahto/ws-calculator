@@ -121,9 +121,11 @@ public class DJBMonthlyBillingCalculationSnapshotService {
 		BigDecimal multiplier = billingRule != null && billingRule.getHighConsumptionMultiplier() != null
 				? BigDecimal.valueOf(billingRule.getHighConsumptionMultiplier())
 				: new BigDecimal("1.5");
-		BigDecimal billingDays = DJBConsumptionPeriodUtil.calculateElapsedDays(cycle.getBillingperiodfrom(), cycle.getBillingperiodto());
+		Long normalizationFrom = DJBConsumptionPeriodUtil.resolveNormalizationStart(
+				cycle.getPreviousokreadingdate(), cycle.getBillingperiodfrom());
+		BigDecimal billingDays = DJBConsumptionPeriodUtil.calculateElapsedDays(normalizationFrom, cycle.getBillingperiodto());
 		BigDecimal monthlyConsumption = DJBConsumptionPeriodUtil.toMonthlyConsumption(cycle.getActualconsumption(),
-				cycle.getBillingperiodfrom(), cycle.getBillingperiodto());
+				normalizationFrom, cycle.getBillingperiodto());
 		BigDecimal threshold = cycle.getPreviousconsumption() == null ? null
 				: cycle.getPreviousconsumption().multiply(multiplier);
 		boolean exceeded = threshold != null && monthlyConsumption != null
@@ -263,9 +265,11 @@ public class DJBMonthlyBillingCalculationSnapshotService {
 		BigDecimal multiplier = billingRule != null && billingRule.getHighConsumptionMultiplier() != null
 				? BigDecimal.valueOf(billingRule.getHighConsumptionMultiplier())
 				: new BigDecimal("1.5");
-		BigDecimal billingDays = DJBConsumptionPeriodUtil.calculateElapsedDays(cycle.getBillingperiodfrom(), cycle.getBillingperiodto());
+		Long normalizationFrom = DJBConsumptionPeriodUtil.resolveNormalizationStart(
+				cycle.getPreviousokreadingdate(), cycle.getBillingperiodfrom());
+		BigDecimal billingDays = DJBConsumptionPeriodUtil.calculateElapsedDays(normalizationFrom, cycle.getBillingperiodto());
 		BigDecimal monthlyConsumption = DJBConsumptionPeriodUtil.toMonthlyConsumption(cycle.getActualconsumption(),
-				cycle.getBillingperiodfrom(), cycle.getBillingperiodto());
+				normalizationFrom, cycle.getBillingperiodto());
 		BigDecimal threshold = cycle.getPreviousconsumption() == null ? null
 				: cycle.getPreviousconsumption().multiply(multiplier);
 		boolean onePointFiveExceeded = Boolean.TRUE.equals(cycle.getOnepointfivexflag());
@@ -544,8 +548,10 @@ public class DJBMonthlyBillingCalculationSnapshotService {
 	}
 
 	private BigDecimal monthlyConsumption(WaterBillingCycle cycle) {
+		Long normalizationFrom = DJBConsumptionPeriodUtil.resolveNormalizationStart(
+				cycle.getPreviousokreadingdate(), cycle.getBillingperiodfrom());
 		return DJBConsumptionPeriodUtil.toMonthlyConsumption(cycle.getActualconsumption(),
-				cycle.getBillingperiodfrom(), cycle.getBillingperiodto());
+				normalizationFrom, cycle.getBillingperiodto());
 	}
 
 	private String actor(RequestInfo requestInfo) {

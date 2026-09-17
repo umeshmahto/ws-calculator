@@ -57,6 +57,28 @@ class ConsumptionServiceMonthly1Point5Test {
     }
 
     @Test
+    void shouldNormalizeFromLastOkReadingWhenAverageCyclesAreIntervening() {
+        WaterBillingCycle current = new WaterBillingCycle();
+        current.setBillingperiodfrom(epoch("2026-08-01"));
+        current.setBillingperiodto(epoch("2026-09-01"));
+        current.setPreviousokreading(new BigDecimal("30"));
+        current.setPreviousokreadingdate(epoch("2026-06-01"));
+        current.setCurrentreading(new BigDecimal("75"));
+
+        BillingBasisDecision decision = BillingBasisDecision.builder()
+                .previousConsumption(new BigDecimal("17"))
+                .billingBasis(BillingBasis.ACTUAL)
+                .build();
+
+        ConsumptionResult result = service.calculate("dl.djb", "WS/DJB/2026-27/000388", current, decision, rule);
+
+        assertEquals(new BigDecimal("45"), result.getActualConsumption());
+        assertEquals(new BigDecimal("14.673913"), result.getMonthlyConsumption());
+        assertEquals(new BigDecimal("0.863171"), result.getDeviationFactor());
+        assertFalse(result.isOnePointFiveX());
+    }
+
+    @Test
     void shouldNotSendBelow20MonthlyConsumptionToZroEvenWhenRawPeriodLooksHigh() {
         WaterBillingCycle current = new WaterBillingCycle();
         current.setBillingperiodfrom(epoch("2026-06-01"));

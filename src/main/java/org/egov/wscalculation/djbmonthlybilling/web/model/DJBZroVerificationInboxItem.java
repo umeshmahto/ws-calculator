@@ -17,6 +17,7 @@ public class DJBZroVerificationInboxItem {
     private Long billingPeriodFrom;
     private Long billingPeriodTo;
     private BigDecimal previousReading;
+    private Long previousOkReadingDate;
     private BigDecimal currentReading;
     private String readingQualityCode;
     private String billingBasis;

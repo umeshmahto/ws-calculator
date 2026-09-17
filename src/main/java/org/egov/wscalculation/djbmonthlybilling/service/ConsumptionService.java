@@ -28,9 +28,11 @@ public class ConsumptionService {
 
 		if (BillingBasis.ACTUAL.equals(decision.getBillingBasis())) {
 			BigDecimal actual = calculateActualConsumption(currentCycle);
-            BigDecimal monthlyConsumption = DJBConsumptionPeriodUtil.toMonthlyConsumption(actual,
-                    currentCycle.getBillingperiodfrom(), currentCycle.getBillingperiodto());
-            BigDecimal previousMonthlyConsumption = decision.getPreviousConsumption();
+			Long normalizationFrom = DJBConsumptionPeriodUtil.resolveNormalizationStart(
+					currentCycle.getPreviousokreadingdate(), currentCycle.getBillingperiodfrom());
+			BigDecimal monthlyConsumption = DJBConsumptionPeriodUtil.toMonthlyConsumption(actual,
+					normalizationFrom, currentCycle.getBillingperiodto());
+			BigDecimal previousMonthlyConsumption = decision.getPreviousConsumption();
             boolean onePointFiveX = isOnePointFiveX(monthlyConsumption, previousMonthlyConsumption, rule);
 
             return ConsumptionResult.builder().actualConsumption(actual).billingConsumption(actual)

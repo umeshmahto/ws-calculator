@@ -11,6 +11,7 @@ public class ZroVerificationInboxRecord {
     private Long billingperiodfrom;
     private Long billingperiodto;
     private BigDecimal previousreading;
+    private Long previousokreadingdate;
     private BigDecimal currentreading;
     private String readingqualitycode;
     private String billingbasis;

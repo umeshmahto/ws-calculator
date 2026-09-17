@@ -27,6 +27,16 @@ public final class DJBConsumptionPeriodUtil {
     }
 
     /**
+     * Returns the effective start of the DJB 1.5x comparison period.
+     * When intervening average/provisional cycles exist, the current OK cycle
+     * must be normalised from the last OK reading date, not from the immediate
+     * meter-reading period start.
+     */
+    public static Long resolveNormalizationStart(Long previousOkReadingDate, Long billingPeriodFrom) {
+        return previousOkReadingDate != null ? previousOkReadingDate : billingPeriodFrom;
+    }
+
+    /**
      * Converts a period consumption into a 30-day monthly equivalent.
      * Fractional-day periods are supported so same-day readings can still be
      * evaluated on the same monthly-equivalent basis.

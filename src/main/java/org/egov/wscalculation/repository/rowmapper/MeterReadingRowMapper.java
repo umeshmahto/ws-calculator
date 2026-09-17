@@ -29,6 +29,11 @@ public class MeterReadingRowMapper implements ResultSetExtractor<List<MeterReadi
 			meterReading.setLastReading(rs.getDouble("lastReading"));
 			meterReading.setLastReadingDate(rs.getLong("lastReadingDate"));
 			meterReading.setMeterStatus(MeterStatusEnum.fromValue(rs.getString("meterStatus")));
+			meterReading.setReadingQualityCode(rs.getString("mr_readingQualityCode"));
+			double consumption = rs.getDouble("mr_consumption");
+			meterReading.setConsumption(rs.wasNull() ? null : consumption);
+			meterReading.setBillingCycleId(rs.getString("mr_billingCycleId"));
+			meterReading.setStatus(rs.getString("mr_billingCycleStatus"));
 			meterReading.setTenantId(rs.getString("tenantid"));
 			AuditDetails auditdetails = AuditDetails.builder().createdBy(rs.getString("mr_createdBy"))
 					.createdTime(rs.getLong("mr_createdTime")).lastModifiedBy(rs.getString("mr_lastModifiedBy"))
