@@ -37,8 +37,7 @@ public class DJBMonthlyBillingFetchController {
 			@Valid @RequestBody DJBMonthlyBillingFetchRequest request) {
 
 		DJBMonthlyBillingStatementResponse serviceResponse = fetchService.fetch(request);
-		serviceResponse
-				.setResponseInfo(responseInfoFactory.createResponseInfoFromRequestInfo(request.getRequestInfo(), true));
+		serviceResponse.setResponseInfo(responseInfoFactory.createResponseInfoFromRequestInfo(request.getRequestInfo(), true));
 
 		return new ResponseEntity<>(serviceResponse, HttpStatus.OK);
 	}
