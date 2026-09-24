@@ -106,6 +106,24 @@ class DJBShadowMeterBillingServiceValidationTest {
 	}
 
 	@Test
+	void shouldPersistLastReadingAsCurrentReadingForAverageBillingRemark() {
+		MeterReading reading = validReading(3000L, 4000L, 84d, null);
+		reading.setReadingQualityCode("MLOC");
+
+		DJBReadingQualityCode rqc = new DJBReadingQualityCode();
+		rqc.setCode("MLOC");
+		rqc.setBillingTreatment("AVERAGE");
+		rqc.setActive(true);
+
+		when(masterProvider.findReadingQualityCode(any(), eq("dl.djb"), eq("MLOC")))
+				.thenReturn(rqc);
+
+		service.normalizeAverageReadingForPersistence(reading, new RequestInfo());
+
+		assertEquals(84d, reading.getCurrentReading());
+	}
+
+	@Test
 	void shouldRejectNullCurrentReadingWhenMdmsTreatmentIsActual() {
 		MeterReading reading = validReading(3000L, 4000L, 60d, null);
 		reading.setReadingQualityCode("BAD_ACTUAL");

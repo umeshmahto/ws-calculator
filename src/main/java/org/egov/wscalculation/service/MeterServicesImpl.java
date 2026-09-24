@@ -61,6 +61,8 @@ public class MeterServicesImpl implements MeterService {
 		if(meterConnectionRequest.getMeterReading().getGenerateDemand()){
 			if ("dl.djb".equalsIgnoreCase(meterConnectionRequest.getMeterReading().getTenantId())) {
 				djbShadowMeterBillingService.resolveAndApplyLastValidReading(meterConnectionRequest.getMeterReading());
+				djbShadowMeterBillingService.normalizeAverageReadingForPersistence(
+						meterConnectionRequest.getMeterReading(), meterConnectionRequest.getRequestInfo());
 			}
 			wsCalulationWorkflowValidator.applicationValidation(meterConnectionRequest.getRequestInfo(),meterConnectionRequest.getMeterReading().getTenantId(),meterConnectionRequest.getMeterReading().getConnectionNo(),genratedemand);
 			wsCalculationValidator.validateMeterReading(meterConnectionRequest.getRequestInfo(),meterConnectionRequest.getMeterReading(), true);
@@ -104,6 +106,8 @@ public class MeterServicesImpl implements MeterService {
 		if(mr.getGenerateDemand()){
 			if ("dl.djb".equalsIgnoreCase(mr.getTenantId())) {
 				djbShadowMeterBillingService.resolveAndApplyLastValidReading(mr);
+				djbShadowMeterBillingService.normalizeAverageReadingForPersistence(
+						mr, meterConnectionRequest.getRequestInfo());
 			}
 			applicationValid=wsCalulationWorkflowValidator.applicationValidationBulk(meterConnectionRequest.getRequestInfo(),mr,genratedemand);
 			readingValid=wsCalculationValidator.validateMeterReadingBulk(meterConnectionRequest.getRequestInfo(),mr, true);

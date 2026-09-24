@@ -61,6 +61,7 @@ public class DJBShadowMeterBillingService {
 
 		MeterReading reading = request.getMeterReading();
 		resolveAndApplyLastValidReading(reading);
+		normalizeAverageReadingForPersistence(reading, request.getRequestInfo());
 		validate(request);
 
 		/*
@@ -95,12 +96,12 @@ public class DJBShadowMeterBillingService {
 	/**
 	 * Resolves the authoritative last valid meter reading for a DJB connection.
 	 *
-	 * <p>Average-billing readings such as MLOC intentionally have
-	 * {@code currentReading = null}. Therefore the immediately preceding meter
-	 * observation must never be used blindly as the source of the next
-	 * {@code lastReading}; otherwise the next MLOC/PLOC round would inherit a
-	 * null baseline. The latest confirmed OK billing cycle remains the numeric
-	 * meter baseline until a new OK reading is captured.</p>
+	 * <p>Average-billing requests such as MLOC may arrive with
+	 * {@code currentReading = null}. The immediately preceding meter observation
+	 * must never be used blindly as the source of the next {@code lastReading};
+	 * otherwise consecutive MLOC/PLOC rounds could inherit a null baseline.
+	 * The latest confirmed OK billing cycle remains the numeric meter baseline
+	 * until a new OK reading is captured.</p>
 	 *
 	 * <p>The supplied reading is retained when no earlier confirmed OK cycle is
 	 * available, which supports the first reading/bootstrap case.</p>
@@ -119,6 +120,40 @@ public class DJBShadowMeterBillingService {
 		if (previousOk != null && previousOk.getCurrentreading() != null) {
 			reading.setLastReading(previousOk.getCurrentreading().doubleValue());
 		}
+	}
+
+	/**
+	 * Restores the legacy meter-reading persistence contract for DJB average-billing
+	 * remarks. The UI and existing meter-reading APIs expect currentReading to be
+	 * populated, while the DJB billing engine must still treat MLOC/PLOC/RDDT/ADF
+	 * and other AVERAGE remarks as non-actual readings.
+	 *
+	 * The persisted value is therefore the last valid meter baseline. The billing
+	 * basis is still determined from the MDMS reading-quality treatment, so this
+	 * synthetic value is never treated as actual consumption.
+	 */
+	public void normalizeAverageReadingForPersistence(MeterReading reading, RequestInfo requestInfo) {
+		if (reading == null || !"dl.djb".equalsIgnoreCase(reading.getTenantId())
+				|| !StringUtils.hasText(reading.getReadingQualityCode())) {
+			return;
+		}
+
+		DJBReadingQualityCode rqc = masterProvider.findReadingQualityCode(
+				requestInfo, reading.getTenantId(), reading.getReadingQualityCode());
+
+		if (rqc == null || !"AVERAGE".equalsIgnoreCase(rqc.getBillingTreatment())) {
+			return;
+		}
+
+		if (reading.getLastReading() == null) {
+			throw new IllegalArgumentException(
+					"Last reading is required for DJB average-billing reading quality code: "
+							+ reading.getReadingQualityCode());
+		}
+
+		// Synthetic persistence value only. ConsumptionService uses BillingBasis.AVERAGE
+		// for this RQC and therefore does not derive actual consumption from this value.
+		reading.setCurrentReading(reading.getLastReading());
 	}
 
 	/**
