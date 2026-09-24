@@ -17,6 +17,7 @@ import org.springframework.stereotype.Service;
 public class ConsumptionService {
 
 	private static final MathContext MC = new MathContext(18, RoundingMode.HALF_UP);
+	private static final int HISTORY_CYCLES_PER_MONTH_GUARD = 4;
 	private final WaterBillingCycleDao billingCycleDao;
 
 	public ConsumptionService(WaterBillingCycleDao billingCycleDao) {
@@ -30,15 +31,15 @@ public class ConsumptionService {
 			BigDecimal actual = calculateActualConsumption(currentCycle);
 			Long normalizationFrom = DJBConsumptionPeriodUtil.resolveNormalizationStart(
 					currentCycle.getPreviousokreadingdate(), currentCycle.getBillingperiodfrom());
-			BigDecimal monthlyConsumption = DJBConsumptionPeriodUtil.toMonthlyConsumption(actual,
-					normalizationFrom, currentCycle.getBillingperiodto());
+			BigDecimal monthlyConsumption = DJBConsumptionPeriodUtil.toMonthlyConsumption(actual, normalizationFrom,
+					currentCycle.getBillingperiodto());
 			BigDecimal previousMonthlyConsumption = decision.getPreviousConsumption();
-            boolean onePointFiveX = isOnePointFiveX(monthlyConsumption, previousMonthlyConsumption, rule);
+			boolean onePointFiveX = isOnePointFiveX(monthlyConsumption, previousMonthlyConsumption, rule);
 
-            return ConsumptionResult.builder().actualConsumption(actual).billingConsumption(actual)
-                    .previousConsumption(previousMonthlyConsumption).monthlyConsumption(monthlyConsumption)
-                    .deviationFactor(calculateDeviation(monthlyConsumption, previousMonthlyConsumption))
-                    .onePointFiveX(onePointFiveX).build();
+			return ConsumptionResult.builder().actualConsumption(actual).billingConsumption(actual)
+					.previousConsumption(previousMonthlyConsumption).monthlyConsumption(monthlyConsumption)
+					.deviationFactor(calculateDeviation(monthlyConsumption, previousMonthlyConsumption))
+					.onePointFiveX(onePointFiveX).build();
 		}
 
 		BigDecimal average = calculateHistoricalAverage(tenantId, connectionNo, currentCycle.getBillingperiodto(),
@@ -76,20 +77,69 @@ public class ConsumptionService {
 
 	public BigDecimal calculateHistoricalAverage(String tenantId, String connectionNo, Long periodTo,
 			Integer lookbackMonths) {
-		List<WaterBillingCycle> cycles = billingCycleDao.findPreviousActualCycles(tenantId, connectionNo, periodTo,
-				lookbackMonths);
-		if (cycles == null || cycles.isEmpty())
+		if (periodTo == null || lookbackMonths == null || lookbackMonths <= 0) {
 			return null;
-
-		BigDecimal total = BigDecimal.ZERO;
-		int count = 0;
-		for (WaterBillingCycle c : cycles) {
-			if (c.getBillingconsumption() != null) {
-				total = total.add(c.getBillingconsumption(), MC);
-				count++;
-			}
 		}
-		return count == 0 ? null : total.divide(BigDecimal.valueOf(count), 3, RoundingMode.HALF_UP);
+
+		/*
+		 * DJB's historical average is defined in months, not in database rows. A single
+		 * meter-reading row can represent multiple billing months when readings are
+		 * collected late. Fetch enough recent actual cycles to cover the configured
+		 * lookback window and weight each cycle by the number of billing-calendar
+		 * months it represents.
+		 */
+		int maxCycles = Math.max(lookbackMonths * HISTORY_CYCLES_PER_MONTH_GUARD, lookbackMonths);
+
+		List<WaterBillingCycle> cycles = billingCycleDao.findPreviousActualCycles(tenantId, connectionNo, periodTo,
+				maxCycles);
+
+		if (cycles == null || cycles.isEmpty()) {
+			return null;
+		}
+
+		BigDecimal targetMonths = BigDecimal.valueOf(lookbackMonths);
+		BigDecimal remainingMonths = targetMonths;
+		BigDecimal weightedMonthlyConsumption = BigDecimal.ZERO;
+		BigDecimal observedMonths = BigDecimal.ZERO;
+
+		for (WaterBillingCycle cycle : cycles) {
+			if (remainingMonths.signum() <= 0 || cycle == null || cycle.getBillingconsumption() == null
+					|| cycle.getBillingconsumption().signum() < 0) {
+				continue;
+			}
+
+			Long normalizationFrom = DJBConsumptionPeriodUtil
+					.resolveNormalizationStart(cycle.getPreviousokreadingdate(), cycle.getBillingperiodfrom());
+
+			long cycleMonths = DJBConsumptionPeriodUtil.calculateBillingMonths(normalizationFrom,
+					cycle.getBillingperiodto());
+
+			if (cycleMonths <= 0) {
+				continue;
+			}
+
+			BigDecimal cycleMonthlyConsumption = DJBConsumptionPeriodUtil.toBillingMonthConsumption(
+					cycle.getBillingconsumption(), normalizationFrom, cycle.getBillingperiodto());
+
+			if (cycleMonthlyConsumption == null) {
+				continue;
+			}
+
+			BigDecimal includedMonths = BigDecimal.valueOf(cycleMonths).min(remainingMonths);
+
+			weightedMonthlyConsumption = weightedMonthlyConsumption
+					.add(cycleMonthlyConsumption.multiply(includedMonths, MC), MC);
+
+			observedMonths = observedMonths.add(includedMonths, MC);
+
+			remainingMonths = remainingMonths.subtract(includedMonths, MC);
+		}
+
+		if (observedMonths.signum() <= 0) {
+			return null;
+		}
+
+		return weightedMonthlyConsumption.divide(observedMonths, 3, RoundingMode.HALF_UP);
 	}
 
 	private BigDecimal calculateDeviation(BigDecimal current, BigDecimal previous) {

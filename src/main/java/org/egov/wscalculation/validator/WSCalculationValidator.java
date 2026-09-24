@@ -95,7 +95,8 @@ public class WSCalculationValidator {
 			errorMap.put("INVALID_METER_READING_STATUS", "Meter status can not be null");
 		}
 
-		if (isUpdate && requiresCurrentReading(meterReading) && (meterReading.getCurrentReading() == null)) {
+		if (isUpdate && requiresCurrentReading(meterReading) && (meterReading.getCurrentReading() == null)
+				&& !allowsDjbAverageReadingWithoutCurrentValue(meterReading)) {
 			errorMap.put("INVALID_CURRENT_METER_READING",
 					"Current Meter Reading cannot be update without current meter reading");
 		}
@@ -177,7 +178,8 @@ public class WSCalculationValidator {
 			errorMap.put("INVALID_METER_READING_STATUS", "Meter status can not be null");
 		}
 
-		if (isUpdate && requiresCurrentReading(meterReading) && (meterReading.getCurrentReading() == null)) {
+		if (isUpdate && requiresCurrentReading(meterReading) && (meterReading.getCurrentReading() == null)
+				&& !allowsDjbAverageReadingWithoutCurrentValue(meterReading)) {
 			errorMessage=errorMessage.equalsIgnoreCase("")?errorMessage.concat("Current Meter Reading cannot be update without current meter reading"):
 				errorMessage.concat(", Current Meter Reading cannot be update without current meter reading");
 			errorMap.put("INVALID_CURRENT_METER_READING",
@@ -222,6 +224,13 @@ public class WSCalculationValidator {
 		String code = meterReading.getReadingQualityCode();
 		return !("MLOC".equalsIgnoreCase(code) || "PLOC".equalsIgnoreCase(code)
 				|| "RDDT".equalsIgnoreCase(code) || "ADF".equalsIgnoreCase(code));
+	}
+
+	private boolean allowsDjbAverageReadingWithoutCurrentValue(MeterReading meterReading) {
+		return meterReading != null
+				&& "dl.djb".equalsIgnoreCase(meterReading.getTenantId())
+				&& StringUtils.hasText(meterReading.getReadingQualityCode())
+				&& !"OK".equalsIgnoreCase(meterReading.getReadingQualityCode());
 	}
 
 	/**

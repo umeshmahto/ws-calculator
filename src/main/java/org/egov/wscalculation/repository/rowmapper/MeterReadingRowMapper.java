@@ -24,7 +24,8 @@ public class MeterReadingRowMapper implements ResultSetExtractor<List<MeterReadi
 			meterReading.setId(rs.getString("id"));
 			meterReading.setConnectionNo(rs.getString("connectionId"));
 			meterReading.setBillingPeriod(rs.getString("billingPeriod"));
-			meterReading.setCurrentReading(rs.getDouble("currentReading"));
+			double currentReading = rs.getDouble("currentReading");
+			meterReading.setCurrentReading(rs.wasNull() ? null : currentReading);
 			meterReading.setCurrentReadingDate(rs.getLong("currentReadingDate"));
 			meterReading.setLastReading(rs.getDouble("lastReading"));
 			meterReading.setLastReadingDate(rs.getLong("lastReadingDate"));

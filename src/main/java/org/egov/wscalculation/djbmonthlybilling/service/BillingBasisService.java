@@ -85,7 +85,9 @@ public class BillingBasisService {
 			return null;
 		}
 		WaterBillingCycle previous = cycles.get(0);
-        return DJBConsumptionPeriodUtil.toMonthlyConsumption(previous.getBillingconsumption(),
-                previous.getBillingperiodfrom(), previous.getBillingperiodto());
+		Long normalizationFrom = DJBConsumptionPeriodUtil.resolveNormalizationStart(previous.getPreviousokreadingdate(),
+				previous.getBillingperiodfrom());
+		return DJBConsumptionPeriodUtil.toMonthlyConsumption(previous.getBillingconsumption(), normalizationFrom,
+				previous.getBillingperiodto());
 	}
 }

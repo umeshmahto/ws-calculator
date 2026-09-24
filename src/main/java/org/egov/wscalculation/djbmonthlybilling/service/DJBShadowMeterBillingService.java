@@ -55,9 +55,13 @@ public class DJBShadowMeterBillingService {
 
 	public List<MeterReading> createAndCalculate(MeterConnectionRequest request) {
 
-		validate(request);
+		if (request == null || request.getMeterReading() == null) {
+			throw new IllegalArgumentException("meterReadings is required");
+		}
 
 		MeterReading reading = request.getMeterReading();
+		resolveAndApplyLastValidReading(reading);
+		validate(request);
 
 		/*
 		 * Shadow endpoint persists the reading directly through the DAO and then runs
@@ -87,6 +91,49 @@ public class DJBShadowMeterBillingService {
 		}
 	}
 
+
+	/**
+	 * Resolves the authoritative last valid meter reading for a DJB connection.
+	 *
+	 * <p>Average-billing readings such as MLOC intentionally have
+	 * {@code currentReading = null}. Therefore the immediately preceding meter
+	 * observation must never be used blindly as the source of the next
+	 * {@code lastReading}; otherwise the next MLOC/PLOC round would inherit a
+	 * null baseline. The latest confirmed OK billing cycle remains the numeric
+	 * meter baseline until a new OK reading is captured.</p>
+	 *
+	 * <p>The supplied reading is retained when no earlier confirmed OK cycle is
+	 * available, which supports the first reading/bootstrap case.</p>
+	 */
+	public void resolveAndApplyLastValidReading(MeterReading reading) {
+		if (reading == null
+				|| !"dl.djb".equalsIgnoreCase(reading.getTenantId())
+				|| !StringUtils.hasText(reading.getConnectionNo())
+				|| reading.getCurrentReadingDate() == null) {
+			return;
+		}
+
+		WaterBillingCycle previousOk = billingCycleDao.findPreviousOkByConnectionBefore(
+				reading.getTenantId(), reading.getConnectionNo(), reading.getCurrentReadingDate());
+
+		if (previousOk != null && previousOk.getCurrentreading() != null) {
+			reading.setLastReading(previousOk.getCurrentreading().doubleValue());
+		}
+	}
+
+	/**
+	 * Returns the authoritative last valid OK reading without mutating the request.
+	 * This is useful for validation and audit callers that only need the baseline.
+	 */
+	public BigDecimal findLastValidReading(String tenantId, String connectionNo, Long beforeTimestamp) {
+		if (!StringUtils.hasText(tenantId) || !StringUtils.hasText(connectionNo) || beforeTimestamp == null) {
+			return null;
+		}
+		WaterBillingCycle previousOk = billingCycleDao.findPreviousOkByConnectionBefore(
+				tenantId, connectionNo, beforeTimestamp);
+		return previousOk == null ? null : previousOk.getCurrentreading();
+	}
+
 	public WaterBillingCycle processDjbBilling(MeterReading reading, RequestInfo requestInfo) {
 
 		String tenantId = reading.getTenantId();
@@ -104,6 +151,7 @@ public class DJBShadowMeterBillingService {
 				reading.getReadingQualityCode());
 
 		validateMeterReadingOrder(reading);
+		validateCurrentReadingAgainstBillingTreatment(reading, rqc);
 
 		long from = reading.getLastReadingDate();
 		long to = reading.getCurrentReadingDate();
@@ -142,7 +190,7 @@ public class DJBShadowMeterBillingService {
 		if (previousOk != null) {
 			cycle.setPreviousokreading(previousOk.getCurrentreading());
 			cycle.setPreviousokreadingdate(previousOk.getCurrentreadingdate());
-		} else {
+		} else if ("OK".equalsIgnoreCase(reading.getReadingQualityCode())) {
 			cycle.setPreviousokreading(BigDecimal.valueOf(reading.getLastReading()));
 			cycle.setPreviousokreadingdate(reading.getLastReadingDate());
 		}
@@ -358,6 +406,15 @@ public class DJBShadowMeterBillingService {
 			return;
 		}
 
+		/*
+		 * Resolve the MDMS RQC before the meter reading is published to the
+		 * asynchronous persister. This prevents an invalid "null current reading"
+		 * payload from being persisted first and rejected only later by billing.
+		 */
+		DJBReadingQualityCode rqc = masterProvider.findReadingQualityCode(requestInfo, reading.getTenantId(),
+				reading.getReadingQualityCode());
+		validateCurrentReadingAgainstBillingTreatment(reading, rqc);
+
 		final String tenantId = reading.getTenantId();
 		final String connectionNo = reading.getConnectionNo();
 		final long from = reading.getLastReadingDate();
@@ -425,8 +482,25 @@ public class DJBShadowMeterBillingService {
 	}
 
 	private boolean allowsNullCurrentReading(String readingQualityCode) {
-		return "MLOC".equalsIgnoreCase(readingQualityCode) || "PLOC".equalsIgnoreCase(readingQualityCode)
-				|| "RDDT".equalsIgnoreCase(readingQualityCode) || "ADF".equalsIgnoreCase(readingQualityCode);
+		/*
+		 * This method is only used before MDMS is fetched. The authoritative
+		 * validation happens in validateCurrentReadingAgainstBillingTreatment().
+		 * For the legacy validation layer we allow a null value for any non-OK DJB
+		 * reading-quality code; unknown/incorrect codes are rejected by MDMS-backed
+		 * validation before billing is calculated.
+		 */
+		return StringUtils.hasText(readingQualityCode) && !"OK".equalsIgnoreCase(readingQualityCode);
+	}
+
+	private void validateCurrentReadingAgainstBillingTreatment(MeterReading reading, DJBReadingQualityCode rqc) {
+		if (reading.getCurrentReading() != null) {
+			return;
+		}
+		if (rqc == null || !"AVERAGE".equalsIgnoreCase(rqc.getBillingTreatment())) {
+			throw new IllegalArgumentException("Current reading is required for billing treatment: "
+					+ (rqc == null ? "UNKNOWN" : rqc.getBillingTreatment()) + ". Reading quality code: "
+					+ reading.getReadingQualityCode());
+		}
 	}
 
 	/**
@@ -463,14 +537,14 @@ public class DJBShadowMeterBillingService {
 			throw new IllegalArgumentException("last reading and dates are required");
 		}
 
+		if (reading.getReadingQualityCode() == null) {
+			throw new IllegalArgumentException("readingQualityCode is required");
+		}
+
 		if (reading.getCurrentReading() == null
 				&& !allowsNullCurrentReading(reading.getReadingQualityCode())) {
 			throw new IllegalArgumentException("current reading is required for reading quality code: "
 					+ reading.getReadingQualityCode());
-		}
-
-		if (reading.getReadingQualityCode() == null) {
-			throw new IllegalArgumentException("readingQualityCode is required");
 		}
 	}
 

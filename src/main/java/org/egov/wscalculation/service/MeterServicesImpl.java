@@ -59,6 +59,9 @@ public class MeterServicesImpl implements MeterService {
 		Boolean genratedemand = true;
 		List<MeterReading> meterReadingsList = new ArrayList<MeterReading>();
 		if(meterConnectionRequest.getMeterReading().getGenerateDemand()){
+			if ("dl.djb".equalsIgnoreCase(meterConnectionRequest.getMeterReading().getTenantId())) {
+				djbShadowMeterBillingService.resolveAndApplyLastValidReading(meterConnectionRequest.getMeterReading());
+			}
 			wsCalulationWorkflowValidator.applicationValidation(meterConnectionRequest.getRequestInfo(),meterConnectionRequest.getMeterReading().getTenantId(),meterConnectionRequest.getMeterReading().getConnectionNo(),genratedemand);
 			wsCalculationValidator.validateMeterReading(meterConnectionRequest.getRequestInfo(),meterConnectionRequest.getMeterReading(), true);
 		}
@@ -99,6 +102,9 @@ public class MeterServicesImpl implements MeterService {
 		String status=null;
 		for(MeterReading mr:meterConnectionRequest.getMeterReadingList()) {
 		if(mr.getGenerateDemand()){
+			if ("dl.djb".equalsIgnoreCase(mr.getTenantId())) {
+				djbShadowMeterBillingService.resolveAndApplyLastValidReading(mr);
+			}
 			applicationValid=wsCalulationWorkflowValidator.applicationValidationBulk(meterConnectionRequest.getRequestInfo(),mr,genratedemand);
 			readingValid=wsCalculationValidator.validateMeterReadingBulk(meterConnectionRequest.getRequestInfo(),mr, true);
 		}
@@ -107,13 +113,25 @@ public class MeterServicesImpl implements MeterService {
 		log.info("readingValid ="+readingValid);
 
 		if(applicationValid && readingValid) {
-		enrichmentService.enrichMeterReadingRequest(meterConnectionRequest.getRequestInfo(),mr);
-		meterReadingsList.add(mr);
-		meterConnectionRequest.setMeterReading(mr);
-		wSCalculationDao.saveMeterReading(meterConnectionRequest);
-		if (mr.getGenerateDemand()) {
-			generateDemandForMeterReading(meterReadingsList, meterConnectionRequest.getRequestInfo());
-		}
+			if (mr.getGenerateDemand() && "dl.djb".equalsIgnoreCase(mr.getTenantId())) {
+				/*
+				 * Keep the DJB bulk path on the same billing engine as the single-reading
+				 * flow. The legacy bulk path bypassed DJB billing-cycle reservation,
+				 * average/1.5x handling and correction orchestration entirely.
+				 */
+				MeterConnectionRequest djbRequest = MeterConnectionRequest.builder()
+						.requestInfo(meterConnectionRequest.getRequestInfo()).meterReading(mr).build();
+				djbShadowMeterBillingService.createAndCalculate(djbRequest);
+				meterReadingsList.add(mr);
+			} else {
+				enrichmentService.enrichMeterReadingRequest(meterConnectionRequest.getRequestInfo(),mr);
+				meterReadingsList.add(mr);
+				meterConnectionRequest.setMeterReading(mr);
+				wSCalculationDao.saveMeterReading(meterConnectionRequest);
+				if (mr.getGenerateDemand()) {
+					generateDemandForMeterReading(meterReadingsList, meterConnectionRequest.getRequestInfo());
+				}
+			}
 		if(mr.getStatus()==null) mr.setStatus("Meter Reading entered successfully");
 		}
 		meterReadingOutput.add(mr);

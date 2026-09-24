@@ -21,7 +21,8 @@ public class MeterReadingCurrentReadingRowMapper implements ResultSetExtractor<L
 			MeterReading meterReading = new MeterReading();
 			
 
-			meterReading.setCurrentReading(rs.getDouble("currentReading"));
+			double currentReading = rs.getDouble("currentReading");
+			meterReading.setCurrentReading(rs.wasNull() ? null : currentReading);
 			
 			meterReadingLists.add(meterReading);
 		}

@@ -1,6 +1,7 @@
 package org.egov.wscalculation.service;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.time.LocalDateTime;
@@ -83,30 +84,10 @@ public class WSCalculationServiceImpl implements WSCalculationService {
 		boolean connectionRequest = false;
 		//Calculate and create demand for connection
 		if (request.getIsDisconnectionRequest() != null && request.getIsDisconnectionRequest()) {
-			MeterReadingSearchCriteria meterCriteria = new MeterReadingSearchCriteria();
-			meterCriteria.setTenantId(request.getCalculationCriteria().get(0).getTenantId());
-			meterCriteria.setConnectionNos(Collections.singleton(request.getCalculationCriteria().get(0).getConnectionNo()));
-			List<MeterReading> meterreadingList = wSCalculationDao.searchMeterReadings(meterCriteria);
-			if (!meterreadingList.isEmpty()) {
-				request.getCalculationCriteria().get(0).setLastReading(meterreadingList.get(0).getLastReading());
-				request.getCalculationCriteria().get(0).setCurrentReading(meterreadingList.get(0).getCurrentReading());
-				SimpleDateFormat f = new SimpleDateFormat("dd/MM/yyyy");
-				String dates[] = meterreadingList.get(0).getBillingPeriod().split("-");
-				try {
-					Date startDate = f.parse(dates[0]);
-					request.getCalculationCriteria().get(0).setFrom(startDate.getTime() + ONE_DAY_ADDON);
-					Date endDate = f.parse(dates[1]);
-					request.getCalculationCriteria().get(0).setTo(endDate.getTime() + ONE_DAY_ADDON);
-				} catch (ParseException e) {
-					throw new RuntimeException(e);
-				}
-			}
-			// Set connectionRequest to true for disconnection so it binds to the connection number,
-			// but it will be routed to the WS.DISCONNECTION business service in DemandService.
-			connectionRequest = request.getIsDisconnectionRequest();
+			connectionRequest = false;
 			masterMap = masterDataService.loadExemptionMaster(request.getRequestInfo(),
 					request.getCalculationCriteria().get(0).getTenantId());
-			calculations = getCalculations(request, masterMap);
+			calculations = getDisconnectionFeeCalculation(request, masterMap);
 		} else if (request.getIsconnectionCalculation()) {
 			connectionRequest = request.getIsconnectionCalculation();
 			masterMap = masterDataService.loadMasterData(request.getRequestInfo(),
@@ -149,7 +130,7 @@ public class WSCalculationServiceImpl implements WSCalculationService {
 		log.info("MDMS(getMasterMap) loaded keys in  getEstimation = {}", masterData.keySet());
 		List<Calculation> calculations;
 		if (request.getIsDisconnectionRequest() != null && request.getIsDisconnectionRequest()) {
-			calculations = getCalculations(request, masterData);
+			calculations = getDisconnectionFeeCalculation(request, masterData);
 		} else {
 			calculations = getFeeCalculation(request, masterData);
 		}
@@ -193,106 +174,51 @@ public class WSCalculationServiceImpl implements WSCalculationService {
 		Long fromDate = (Long) financialYearMaster.get(WSCalculationConstant.STARTING_DATE_APPLICABLES);
 		Long toDate = (Long) financialYearMaster.get(WSCalculationConstant.ENDING_DATE_APPLICABLES);
 		if(isLastElementWithDisconnectionRequest) {
-			if (waterConnection.getApplicationStatus().equalsIgnoreCase(WSCalculationConstant.PENDING_APPROVAL_FOR_DISCONNECTION)) {
+			// Initialize Disconnection Fees to ZERO (strictly rely on MDMS)
+			BigDecimal temporaryFee = BigDecimal.ZERO;
+			BigDecimal nonPaymentFee = BigDecimal.ZERO;
+			BigDecimal permanentFee = BigDecimal.ZERO;
 
-				List<WaterConnection> waterConnectionList = calculatorUtil.getWaterConnection(requestInfo, criteria.getConnectionNo(), requestInfo.getUserInfo().getTenantId());
-				for (WaterConnection connection : waterConnectionList) {
-					if (connection.getApplicationType().equalsIgnoreCase(NEW_WATER_CONNECTION)) {
-						List<Demand> demandsList = demandService.searchDemandForDisconnectionRequest(requestInfo.getUserInfo().getTenantId(), Collections.singleton(connection.getConnectionNo()),
-								null,	toDate, requestInfo, null, isLastElementWithDisconnectionRequest);
-						Demand demand = null;
-						if (!CollectionUtils.isEmpty(demandsList)) {
-							demand = demandsList.get(0);
-							fromDate = (Long) demand.getTaxPeriodFrom();
-							toDate = (Long) demand.getTaxPeriodTo();
-							BigDecimal totalTaxAmount = BigDecimal.ZERO;
-							List<DemandDetail> demandDetails = demand.getDemandDetails();
-							for (DemandDetail demandDetail : demandDetails) {
-								totalTaxAmount = totalTaxAmount.add(demandDetail.getTaxAmount());
-							}
-							Integer taxPeriod = Math.round((toDate - fromDate) / 86400000);
-							Long daysOfUsage = Math.round(Math.abs(Double.parseDouble(toDate.toString()) - waterConnection.getDateEffectiveFrom()) / 86400000);
-							BigDecimal finalWaterCharge;
-							if (taxPeriod <= 0) {
-								// taxPeriodFrom == taxPeriodTo on the existing demand; pro-rata division is
-								// impossible (would produce Infinity). Fall back to the full monthly amount.
-								log.warn("[Disconnection] taxPeriod is {} for connectionNo={}; cannot do pro-rata division. Using full demand amount as disconnection charge.",
-										taxPeriod, connection.getConnectionNo());
-								finalWaterCharge = waterCharge.add(totalTaxAmount);
-							} else {
-								finalWaterCharge = waterCharge.add(BigDecimal.valueOf(
-										(Double.parseDouble(totalTaxAmount.toString()) * daysOfUsage) / taxPeriod));
-							}
-							criteria.setTo(waterConnection.getDateEffectiveFrom());
-							criteria.setFrom(toDate);
-
-							//Calculate water cess for disconnection charge
-							BigDecimal waterCess = getWaterCessForDisconnection(masterMap, finalWaterCharge);
-							for (TaxHeadEstimate estimate : estimates) {
-								if (estimate.getTaxHeadCode().equals(WS_WATER_CESS)) {
-									estimates.remove(estimate);
-									break;
-								}
-							}
-							estimates.add(TaxHeadEstimate.builder().taxHeadCode(WSCalculationConstant.WS_WATER_CESS)
-									.estimateAmount(waterCess.setScale(2, 2)).build());
-							estimates.stream().forEach(estimate -> {
-								if (taxHeadCategoryMap.containsKey(estimate.getTaxHeadCode())) {
-									if (taxHeadCategoryMap.get(estimate.getTaxHeadCode()).equals(CHARGES)) {
-										estimate.setEstimateAmount(finalWaterCharge);
-									}
-								}
-							});
+			try {
+				JSONArray feeSlab = (JSONArray) masterMap.get(WSCalculationConstant.WC_FEESLAB_MASTER);
+				if (feeSlab != null && !feeSlab.isEmpty()) {
+					for (Object obj : feeSlab) {
+						Map<String, Object> feeObj = mapper.convertValue(obj, Map.class);
+						String feeComponent = feeObj.get("feeComponent") != null ? feeObj.get("feeComponent").toString() : "";
+						if ((WSCalculationConstant.TEMPORARY_DISCONNECTION_FEE_CONST.equalsIgnoreCase(feeComponent) || "temporaryDisconnectionFee".equalsIgnoreCase(feeComponent)) && feeObj.get("amount") != null) {
+							temporaryFee = new BigDecimal(feeObj.get("amount").toString());
+						} else if ((WSCalculationConstant.NON_PAYMENT_DISCONNECTION_FEE_CONST.equalsIgnoreCase(feeComponent) || "nonPaymentDisconnectionFee".equalsIgnoreCase(feeComponent)) && feeObj.get("amount") != null) {
+							nonPaymentFee = new BigDecimal(feeObj.get("amount").toString());
+						} else if ((WSCalculationConstant.PERMANENT_DISCONNECTION_FEE_CONST.equalsIgnoreCase(feeComponent) || "permanentDisconnectionFee".equalsIgnoreCase(feeComponent)) && feeObj.get("amount") != null) {
+							permanentFee = new BigDecimal(feeObj.get("amount").toString());
 						}
-
-						// Initialize Disconnection Fees to ZERO (strictly rely on MDMS)
-						BigDecimal temporaryFee = BigDecimal.ZERO;
-						BigDecimal nonPaymentFee = BigDecimal.ZERO;
-						BigDecimal permanentFee = BigDecimal.ZERO;
-
-						try {
-							JSONArray feeSlab = (JSONArray) masterMap.get(WSCalculationConstant.WC_FEESLAB_MASTER);
-							if (feeSlab != null && !feeSlab.isEmpty()) {
-								for (Object obj : feeSlab) {
-									Map<String, Object> feeObj = mapper.convertValue(obj, Map.class);
-									String feeComponent = feeObj.get("feeComponent") != null ? feeObj.get("feeComponent").toString() : "";
-									if ((WSCalculationConstant.TEMPORARY_DISCONNECTION_FEE_CONST.equalsIgnoreCase(feeComponent) || "temporaryDisconnectionFee".equalsIgnoreCase(feeComponent)) && feeObj.get("amount") != null) {
-										temporaryFee = new BigDecimal(feeObj.get("amount").toString());
-									} else if ((WSCalculationConstant.NON_PAYMENT_DISCONNECTION_FEE_CONST.equalsIgnoreCase(feeComponent) || "nonPaymentDisconnectionFee".equalsIgnoreCase(feeComponent)) && feeObj.get("amount") != null) {
-										nonPaymentFee = new BigDecimal(feeObj.get("amount").toString());
-									} else if ((WSCalculationConstant.PERMANENT_DISCONNECTION_FEE_CONST.equalsIgnoreCase(feeComponent) || "permanentDisconnectionFee".equalsIgnoreCase(feeComponent)) && feeObj.get("amount") != null) {
-										permanentFee = new BigDecimal(feeObj.get("amount").toString());
-									}
-								}
-							} else {
-								log.warn("FeeSlab master not found in MDMS. Disconnection fees will be 0.");
-							}
-						} catch (Exception e) {
-							log.error("Error fetching disconnection fees from MDMS FeeSlab", e);
-						}
-
-						BigDecimal finalDisconnectionFee = permanentFee; // Default to permanent
-						if (waterConnection.getIsDisconnectionTemporary() != null && waterConnection.getIsDisconnectionTemporary()) {
-							finalDisconnectionFee = temporaryFee;
-						} else if ("Non-Payment".equalsIgnoreCase(waterConnection.getDisconnectionReason())) {
-							finalDisconnectionFee = nonPaymentFee;
-						}
-
-						log.info("[Disconnection] Applying fixed disconnection fee of {} for connectionNo={} (isTemporary={}, reason={})", 
-							finalDisconnectionFee, connection.getConnectionNo(), waterConnection.getIsDisconnectionTemporary(), waterConnection.getDisconnectionReason());
-
-						estimates.clear();
-						estimates.add(TaxHeadEstimate.builder()
-								.taxHeadCode(WSCalculationConstant.WS_DISCONNECTION_FEE)
-								.estimateAmount(finalDisconnectionFee.setScale(2, 2))
-								.build());
-						
-						// Billing period for disconnection fee demand should just be current time (one-time fee)
-						criteria.setTo(System.currentTimeMillis());
-						criteria.setFrom(System.currentTimeMillis());
 					}
+				} else {
+					log.warn("FeeSlab master not found in MDMS. Disconnection fees will be 0.");
 				}
+			} catch (Exception e) {
+				log.error("Error fetching disconnection fees from MDMS FeeSlab", e);
 			}
+
+			BigDecimal finalDisconnectionFee = permanentFee; // Default to permanent
+			if (waterConnection.getIsDisconnectionTemporary() != null && waterConnection.getIsDisconnectionTemporary()) {
+				finalDisconnectionFee = temporaryFee;
+			} else if ("Non-Payment".equalsIgnoreCase(waterConnection.getDisconnectionReason())) {
+				finalDisconnectionFee = nonPaymentFee;
+			}
+
+			log.info("[Disconnection] Applying fixed disconnection fee of {} for connectionNo={} (isTemporary={}, reason={})", 
+				finalDisconnectionFee, criteria.getConnectionNo(), waterConnection.getIsDisconnectionTemporary(), waterConnection.getDisconnectionReason());
+
+			estimates.clear();
+			estimates.add(TaxHeadEstimate.builder()
+					.taxHeadCode(WSCalculationConstant.WS_DISCONNECTION_FEE)
+					.estimateAmount(finalDisconnectionFee.setScale(2, RoundingMode.HALF_UP))
+					.build());
+			
+			// Billing period for disconnection fee demand should just be current time (one-time fee)
+			criteria.setTo(System.currentTimeMillis());
+			criteria.setFrom(System.currentTimeMillis());
 		}
 
 		for (TaxHeadEstimate estimate : estimates) {
@@ -497,6 +423,18 @@ public class WSCalculationServiceImpl implements WSCalculationService {
 		return calculations;
 	}
 	
+	List<Calculation> getDisconnectionFeeCalculation(CalculationReq request, Map<String, Object> masterMap) {
+		List<Calculation> calculations = new ArrayList<>(request.getCalculationCriteria().size());
+		for (CalculationCriteria criteria : request.getCalculationCriteria()) {
+			Map<String, List> estimationMap = new HashMap<>();
+			estimationMap.put("estimates", new ArrayList<TaxHeadEstimate>());
+			masterDataService.enrichBillingPeriodForFee(masterMap);
+			Calculation calculation = getCalculation(request.getRequestInfo(), criteria, estimationMap, masterMap, true, true);
+			calculations.add(calculation);
+		}
+		return calculations;
+	}
+
 	List<Calculation> getReconnectionFeeCalculation(CalculationReq request, Map<String, Object> masterMap) {
 		List<Calculation> calculations = new ArrayList<>(request.getCalculationCriteria().size());
 		for (CalculationCriteria criteria : request.getCalculationCriteria()) {

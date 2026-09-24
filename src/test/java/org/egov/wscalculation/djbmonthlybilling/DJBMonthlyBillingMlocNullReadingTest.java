@@ -54,10 +54,12 @@ class DJBMonthlyBillingMlocNullReadingTest {
                 .build();
 
         WaterBillingCycle actual = new WaterBillingCycle();
+		actual.setBillingperiodfrom(1769884200000L - (30L * 24L * 60L * 60L * 1000L));
+		actual.setBillingperiodto(1769884200000L);
         actual.setBillingconsumption(new BigDecimal("18"));
 
         when(billingCycleDao.findPreviousActualCycles(
-                "dl.djb", "WS/DJB/MLOC-1", 1769884200000L, 12))
+				"dl.djb", "WS/DJB/MLOC-1", 1769884200000L, 48))
                 .thenReturn(Collections.singletonList(actual));
 
         ConsumptionResult result = service.calculate(

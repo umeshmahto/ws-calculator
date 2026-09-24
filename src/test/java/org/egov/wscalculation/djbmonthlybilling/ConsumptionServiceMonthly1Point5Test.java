@@ -3,8 +3,10 @@ package org.egov.wscalculation.djbmonthlybilling;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
+import java.util.Arrays;
 
 import org.egov.wscalculation.djbmonthlybilling.model.WaterBillingCycle;
 import org.egov.wscalculation.djbmonthlybilling.model.master.DJBMonthlyBillingRule;
@@ -134,6 +136,89 @@ class ConsumptionServiceMonthly1Point5Test {
 
         assertEquals(new BigDecimal("120.000000"), result.getMonthlyConsumption());
         assertTrue(result.isOnePointFiveX());
+    }
+
+    @Test
+    void shouldNotTrigger15xWhenRawMultiMonthConsumptionIsHighButMonthlyEquivalentIsNormal() {
+        WaterBillingCycle current = new WaterBillingCycle();
+        current.setBillingperiodfrom(epoch("2026-03-01"));
+        current.setBillingperiodto(epoch("2026-04-30"));
+        current.setPreviousokreading(new BigDecimal("100"));
+        current.setCurrentreading(new BigDecimal("160"));
+
+        BillingBasisDecision decision = BillingBasisDecision.builder()
+                .previousConsumption(new BigDecimal("35"))
+                .billingBasis(BillingBasis.ACTUAL)
+                .build();
+
+        ConsumptionResult result = service.calculate("dl.djb", "WS/DJB/1", current, decision, rule);
+
+        // 60 KL over roughly two months is ~30 KL/month. It must be compared
+        // against 35 KL/month, not against the raw 60 KL meter delta.
+        assertEquals(new BigDecimal("30.000000"), result.getMonthlyConsumption());
+        assertFalse(result.isOnePointFiveX());
+    }
+
+    @Test
+    void shouldTrigger15xUsingMonthlyEquivalentWhenThreeMonthRawDeltaCrossesThreshold() {
+        WaterBillingCycle current = new WaterBillingCycle();
+        current.setBillingperiodfrom(epoch("2026-01-01"));
+        current.setBillingperiodto(epoch("2026-04-01"));
+        current.setPreviousokreading(new BigDecimal("100"));
+        current.setCurrentreading(new BigDecimal("160"));
+
+        BillingBasisDecision decision = BillingBasisDecision.builder()
+                .previousConsumption(new BigDecimal("13"))
+                .billingBasis(BillingBasis.ACTUAL)
+                .build();
+
+        ConsumptionResult result = service.calculate("dl.djb", "WS/DJB/2", current, decision, rule);
+
+        // 60 KL over three months = 20 KL/month. 20 > 1.5 * 13 and also meets
+        // the DJB minimum 20 KL/month gate.
+        assertEquals(new BigDecimal("20.000000"), result.getMonthlyConsumption());
+        assertTrue(result.isOnePointFiveX());
+    }
+
+    @Test
+    void shouldWeightHistoricalAverageByObservedDaysInsteadOfCycleCount() {
+        WaterBillingCycle current = new WaterBillingCycle();
+        current.setBillingperiodfrom(epoch("2026-04-01"));
+        current.setBillingperiodto(epoch("2026-05-01"));
+        current.setCurrentreading(null);
+
+        DJBMonthlyBillingRule averageRule = new DJBMonthlyBillingRule();
+        averageRule.setAverageLookbackMonths(12);
+        averageRule.setAverageMaximumCycles(2);
+        averageRule.setProvisionalMaximumCycles(2);
+        averageRule.setMinimumPostAverageConsumptionKl(25);
+
+        BillingBasisDecision decision = BillingBasisDecision.builder()
+                .billingBasis(BillingBasis.AVERAGE)
+                .averageCycleCount(1)
+                .provisionalCycleCount(0)
+                .build();
+
+        WaterBillingCycle threeMonthCycle = new WaterBillingCycle();
+        threeMonthCycle.setBillingperiodfrom(epoch("2025-01-01"));
+        threeMonthCycle.setBillingperiodto(epoch("2025-04-01"));
+        threeMonthCycle.setBillingconsumption(new BigDecimal("60"));
+
+        WaterBillingCycle oneMonthCycle = new WaterBillingCycle();
+        oneMonthCycle.setBillingperiodfrom(epoch("2024-12-01"));
+        oneMonthCycle.setBillingperiodto(epoch("2025-01-01"));
+        oneMonthCycle.setBillingconsumption(new BigDecimal("10"));
+
+        when(billingCycleDao.findPreviousActualCycles("dl.djb", "WS/DJB/HISTORY", current.getBillingperiodto(), 48))
+                .thenReturn(Arrays.asList(threeMonthCycle, oneMonthCycle));
+
+        ConsumptionResult result = service.calculate("dl.djb", "WS/DJB/HISTORY", current, decision, averageRule);
+
+        // (60 KL / 3 months + 10 KL / 1 month) / 2 observed monthly periods
+        // is NOT a valid average. The correct duration-weighted average is
+        // (60 + 10) / 4 months = 17.5 KL/month.
+        assertEquals(new BigDecimal("17.500"), result.getAverageConsumption());
+        assertEquals(new BigDecimal("17.500"), result.getBillingConsumption());
     }
 
     private Long epoch(String date) {

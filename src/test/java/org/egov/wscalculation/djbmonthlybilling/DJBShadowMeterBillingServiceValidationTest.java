@@ -1,5 +1,6 @@
 package org.egov.wscalculation.djbmonthlybilling;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -51,6 +52,27 @@ class DJBShadowMeterBillingServiceValidationTest {
 
 
 	@Test
+	void shouldCarryForwardLastValidOkReadingWhenPreviousMlocHasNullCurrentReading() {
+		MeterReading reading = validReading(5000L, 6000L, null, null);
+		reading.setReadingQualityCode("MLOC");
+		reading.setLastReadingDate(5000L);
+		reading.setCurrentReadingDate(6000L);
+
+		WaterBillingCycle previousOk = cycle("OK-1", 3000L, 4000L);
+		previousOk.setReadingqualitycode("OK");
+		previousOk.setCurrentreading(new java.math.BigDecimal("80"));
+		previousOk.setCurrentreadingdate(4000L);
+
+		when(billingCycleDao.findPreviousOkByConnectionBefore("dl.djb", reading.getConnectionNo(), 6000L))
+				.thenReturn(previousOk);
+
+		service.resolveAndApplyLastValidReading(reading);
+
+		assertEquals(80d, reading.getLastReading());
+	}
+
+
+	@Test
 	void shouldAllowNonContiguousBillingPeriod() {
 		MeterReading reading = validReading(3000L, 4000L, 60d, 70d);
 		org.junit.jupiter.api.Assertions.assertDoesNotThrow(() -> service.validateCanCreateBillingCycle(reading));
@@ -74,6 +96,30 @@ class DJBShadowMeterBillingServiceValidationTest {
 				.thenReturn(new DJBReadingQualityCode());
 
 		assertThrows(IllegalArgumentException.class, () -> service.processDjbBilling(reading, new RequestInfo()));
+	}
+
+	@Test
+	void shouldAllowNullCurrentReadingForAverageBillingRemark() {
+		MeterReading reading = validReading(3000L, 4000L, 60d, null);
+		reading.setReadingQualityCode("MLOC");
+		org.junit.jupiter.api.Assertions.assertDoesNotThrow(() -> service.validateCanCreateBillingCycle(reading));
+	}
+
+	@Test
+	void shouldRejectNullCurrentReadingWhenMdmsTreatmentIsActual() {
+		MeterReading reading = validReading(3000L, 4000L, 60d, null);
+		reading.setReadingQualityCode("BAD_ACTUAL");
+
+		DJBReadingQualityCode rqc = new DJBReadingQualityCode();
+		rqc.setCode("BAD_ACTUAL");
+		rqc.setBillingTreatment("ACTUAL");
+		rqc.setActive(true);
+
+		when(masterProvider.getBillingRule(any(), eq("dl.djb"))).thenReturn(new DJBMonthlyBillingRule());
+		when(masterProvider.findReadingQualityCode(any(), eq("dl.djb"), eq("BAD_ACTUAL"))).thenReturn(rqc);
+
+		assertThrows(IllegalArgumentException.class,
+				() -> service.processDjbBilling(reading, new RequestInfo()));
 	}
 
 	private MeterReading validReading(Long lastDate, Long currentDate, Double lastReading, Double currentReading) {

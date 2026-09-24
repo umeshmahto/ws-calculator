@@ -506,6 +506,9 @@ public class MasterDataService {
 		// Add WS.MUTATION tax heads and periods
 		addServiceTaxHeadsAndPeriods(requestInfo, tenantId, WSCalculationConstant.MUTATION_BUSINESS_SERVICE, master);
 		
+		// Add WS.DISCONNECTION tax heads and periods
+		addServiceTaxHeadsAndPeriods(requestInfo, tenantId, "WS.DISCONNECTION", master);
+		
 		MdmsResponse response = mapper.convertValue(
 				repository.fetchResult(calculatorUtils.getMdmsSearchUrl(),
 						calculatorUtils.getEstimationMasterCriteria(requestInfo, tenantId)),

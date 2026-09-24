@@ -540,8 +540,8 @@ public class DJBMonthlyBillingCalculationSnapshotService {
 			return "Actual consumption did not trigger the DJB 1.5x rule.";
 		}
 		if (zroRequired) {
-			return cycle.getActualconsumption() + " KL exceeds 1.5 x previous consumption (" + threshold
-					+ " KL) and requires ZRO verification.";
+			return currentMonthly + " KL/month exceeds 1.5 x previous monthly consumption (" + threshold
+					+ " KL/month) and requires ZRO verification.";
 		}
 		return monthlyConsumption(cycle)
 				+ " KL/month exceeded the 1.5 x comparison, but the current cycle does not require ZRO blocking.";

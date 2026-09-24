@@ -55,8 +55,12 @@ public class DJBMonthlyBillingMasterProvider {
     public DJBMonthlyBillingRule getBillingRule(RequestInfo requestInfo, String tenantId) {
         List<DJBMonthlyBillingRule> rules = convert(fetchMaster(requestInfo, tenantId, "DJBMonthlyBillingRule"),
                 DJBMonthlyBillingRule.class);
-        if (rules.isEmpty()) throw new IllegalStateException("DJBMonthlyBillingRule master is missing");
-        return rules.get(0);
+        for (DJBMonthlyBillingRule rule : rules) {
+            if (rule != null && Boolean.TRUE.equals(rule.getActive())) {
+                return rule;
+            }
+        }
+        throw new IllegalStateException("No active DJBMonthlyBillingRule is configured for tenant: " + tenantId);
     }
 
     public List<DJBMonthlyWaterTariff> getWaterTariffs(RequestInfo requestInfo, String tenantId) {
