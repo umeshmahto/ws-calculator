@@ -3,8 +3,12 @@ package org.egov.wscalculation.djbmonthlybilling.service;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
 
 import org.egov.common.contract.request.RequestInfo;
@@ -37,6 +41,15 @@ import lombok.extern.slf4j.Slf4j;
 @Service
 @Slf4j
 public class CorrectionService {
+
+	/**
+	 * DJB Table 25: meter remarks eligible for automatic OK-after-average
+	 * correction. VMMT is retained as a compatibility alias because Table 24
+	 * uses VMMT while Table 25 uses MMT for the same moisture/vapour remark.
+	 */
+	private static final Set<String> AUTOMATIC_CORRECTION_RQCS = Collections.unmodifiableSet(
+			new HashSet<>(Arrays.asList(
+					"MLOC", "PLOC", "RDDT", "ADF", "DUST", "MMT", "VMMT", "MBUR")));
 
 	private final WaterBillingCycleDao billingCycleDao;
 	private final BillingCorrectionDao billingCorrectionDao;
@@ -82,12 +95,11 @@ public class CorrectionService {
 				}
 
 				/*
-				 * Only estimated billing is corrected automatically. An ACTUAL/CORRECTED_ACTUAL
-				 * cycle terminates that assumption and therefore must not be cancelled by this
-				 * plan.
+				 * DJB Table 25 allows automatic cancellation/rebilling only for the
+				 * explicitly listed meter remarks. A generic AVERAGE/PROVISIONAL cycle
+				 * outside that RQC scope must never be silently corrected.
 				 */
-				if (BillingBasis.AVERAGE.equals(cycle.getBillingbasis())
-						|| BillingBasis.PROVISIONAL.equals(cycle.getBillingbasis())) {
+				if (isAutomaticCorrectionEligible(cycle)) {
 					eligibleCycles.add(cycle);
 				}
 			}
@@ -289,9 +301,22 @@ public class CorrectionService {
 	}
 
 	private boolean isEligibleCorrectionCycle(WaterBillingCycle cycle) {
-		return cycle != null
-				&& (BillingBasis.AVERAGE.equals(cycle.getBillingbasis())
-						|| BillingBasis.PROVISIONAL.equals(cycle.getBillingbasis()));
+		return isAutomaticCorrectionEligible(cycle);
+	}
+
+	private boolean isAutomaticCorrectionEligible(WaterBillingCycle cycle) {
+		if (cycle == null || cycle.getBillingbasis() == null
+				|| cycle.getReadingqualitycode() == null) {
+			return false;
+		}
+
+		if (!BillingBasis.AVERAGE.equals(cycle.getBillingbasis())
+				&& !BillingBasis.PROVISIONAL.equals(cycle.getBillingbasis())) {
+			return false;
+		}
+
+		return AUTOMATIC_CORRECTION_RQCS.contains(
+				cycle.getReadingqualitycode().trim().toUpperCase(Locale.ENGLISH));
 	}
 
 	private boolean isPreviousOkCycle(WaterBillingCycle cycle, CorrectionPlan plan) {

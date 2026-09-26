@@ -57,6 +57,45 @@ class RebateCalculationServiceTest {
     }
 
     @Test
+    void shouldApplyFreeWaterFor60KlRepresentingThreeBillingMonths() {
+        RebateCalculationContext context = RebateCalculationContext.builder()
+                .consumption(bd("60"))
+                .monthlyConsumption(bd("20"))
+                .billingBasis(BillingBasis.ACTUAL)
+                .readingQualityCode("OK")
+                .consumerType("INDIVIDUAL_RESIDENCE")
+                .propertyCategory("CAT_I")
+                .connectionType("DOMESTIC")
+                .bulkConnection(false)
+                .freeWaterEligibleAmount(bd("755.43"))
+                .build();
+
+        RebateCalculationResult result = service.calculate(context, Arrays.asList(freeWaterRule()));
+
+        assertEquals(bd("755.43"), result.getTotalRebate());
+    }
+
+    @Test
+    void shouldApplyBulkFreeWaterUsingMonthlyConsumptionPerDwellingUnit() {
+        RebateCalculationContext context = RebateCalculationContext.builder()
+                .consumption(bd("60"))
+                .monthlyConsumption(bd("20"))
+                .billingBasis(BillingBasis.ACTUAL)
+                .readingQualityCode("OK")
+                .consumerType("INDIVIDUAL_RESIDENCE")
+                .propertyCategory("CAT_I")
+                .connectionType("DOMESTIC")
+                .bulkConnection(true)
+                .dwellingUnitCount(2)
+                .freeWaterEligibleAmount(bd("1500"))
+                .build();
+
+        RebateCalculationResult result = service.calculate(context, Arrays.asList(freeWaterRule()));
+
+        assertEquals(bd("1500.00"), result.getTotalRebate());
+    }
+
+    @Test
     void shouldNotApplyFreeWaterRebateAbove20Kl() {
         RebateCalculationContext context = RebateCalculationContext.builder()
                 .consumption(bd("20.001"))

@@ -45,6 +45,13 @@ public class DJBMonthlyBillingQueryBuilder {
 				+ "ORDER BY billingperiodto DESC LIMIT ?";
 	}
 
+	public String findPreviousActualCyclesWithinPeriod() {
+		return "SELECT * FROM eg_ws_billingcycle " + "WHERE tenantid = ? AND connectionno = ? "
+				+ "AND billingperiodto > ? AND billingperiodto < ? "
+				+ "AND billingbasis IN ('ACTUAL', 'CORRECTED_ACTUAL') "
+				+ "ORDER BY billingperiodto DESC LIMIT ?";
+	}
+
 	public String findCyclesForConnection() {
 		return "SELECT * FROM eg_ws_billingcycle " + "WHERE tenantid = ? AND connectionno = ? "
 				+ "AND billingperiodto < ? " + "ORDER BY billingperiodto DESC LIMIT ?";

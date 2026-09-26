@@ -62,7 +62,9 @@ class CorrectionServiceTest {
 		previousOk.setCurrentreading(new BigDecimal("100"));
 
 		WaterBillingCycle average = cycle("avg-1", BillingBasis.AVERAGE, 200L, 300L);
+		average.setReadingqualitycode("MLOC");
 		WaterBillingCycle provisional = cycle("prov-1", BillingBasis.PROVISIONAL, 300L, 400L);
+		provisional.setReadingqualitycode("PLOC");
 		WaterBillingCycle actual = cycle("actual-1", BillingBasis.ACTUAL, 400L, 500L);
 
 		WaterBillingCycle currentOk = cycle("ok-2", BillingBasis.ACTUAL, 500L, 600L);
@@ -96,6 +98,7 @@ class CorrectionServiceTest {
 		previousOk.setCurrentreading(new BigDecimal("100"));
 
 		WaterBillingCycle provisional = cycle("prov-1", BillingBasis.PROVISIONAL, 200L, 300L);
+		provisional.setReadingqualitycode("PLOC");
 		provisional.setDemandid("demand-prov-1");
 
 		WaterBillingCycle currentOk = cycle("ok-2", BillingBasis.ACTUAL, 300L, 400L);
@@ -146,6 +149,7 @@ class CorrectionServiceTest {
 		previousOk.setDemandid("demand-ok-1");
 
 		WaterBillingCycle provisional = cycle("prov-1", BillingBasis.PROVISIONAL, 200L, 300L);
+		provisional.setReadingqualitycode("PLOC");
 		provisional.setDemandid("demand-prov-1");
 
 		CorrectionPlan plan = CorrectionPlan.builder().correctionRequired(true)
@@ -169,6 +173,62 @@ class CorrectionServiceTest {
 		verify(demandService).searchDemand(eq(tenantId), eq(Collections.singleton(connectionNo)),
 			eq(provisional.getBillingperiodfrom()), eq(provisional.getBillingperiodto()), any(RequestInfo.class),
 				eq(null), eq(false), eq(false));
+	}
+
+	@Test
+	void shouldNotAutomaticallyCorrectGenericProvisionalCycleOutsideDjbTable25() {
+		String tenantId = "dl.djb";
+		String connectionNo = "WS/DJB/2026-27/000367";
+
+		WaterBillingCycle previousOk = cycle("ok-1", BillingBasis.ACTUAL, 100L, 200L);
+		previousOk.setCurrentreading(new BigDecimal("100"));
+
+		WaterBillingCycle provisional = cycle("prov-1", BillingBasis.PROVISIONAL, 200L, 300L);
+		provisional.setReadingqualitycode("OTHER_PROVISIONAL");
+
+		WaterBillingCycle currentOk = cycle("ok-2", BillingBasis.ACTUAL, 300L, 400L);
+		currentOk.setCurrentreading(new BigDecimal("150"));
+		currentOk.setReadingqualitycode("OK");
+
+		when(billingCycleDao.findPreviousOkByConnectionBefore(eq(tenantId), eq(connectionNo),
+				eq(currentOk.getBillingperiodto()))).thenReturn(previousOk);
+
+		when(billingCycleDao.findCyclesForCorrection(eq(tenantId), eq(connectionNo),
+				eq(previousOk.getBillingperiodto()), eq(currentOk.getBillingperiodto())))
+				.thenReturn(Collections.singletonList(provisional));
+
+		CorrectionPlan plan = service.buildCorrectionPlan(tenantId, currentOk);
+
+		assertTrue(!plan.isCorrectionRequired());
+		assertEquals(0, plan.getCyclesToCorrect().size());
+	}
+
+	@Test
+	void shouldNotAutomaticallyCorrectAverageCycleWithUnsupportedReadingQualityCode() {
+		String tenantId = "dl.djb";
+		String connectionNo = "WS/DJB/2026-27/000367";
+
+		WaterBillingCycle previousOk = cycle("ok-1", BillingBasis.ACTUAL, 100L, 200L);
+		previousOk.setCurrentreading(new BigDecimal("100"));
+
+		WaterBillingCycle average = cycle("avg-1", BillingBasis.AVERAGE, 200L, 300L);
+		average.setReadingqualitycode("UNSUPPORTED_AVERAGE_RQC");
+
+		WaterBillingCycle currentOk = cycle("ok-2", BillingBasis.ACTUAL, 300L, 400L);
+		currentOk.setCurrentreading(new BigDecimal("150"));
+		currentOk.setReadingqualitycode("OK");
+
+		when(billingCycleDao.findPreviousOkByConnectionBefore(eq(tenantId), eq(connectionNo),
+				eq(currentOk.getBillingperiodto()))).thenReturn(previousOk);
+
+		when(billingCycleDao.findCyclesForCorrection(eq(tenantId), eq(connectionNo),
+				eq(previousOk.getBillingperiodto()), eq(currentOk.getBillingperiodto())))
+				.thenReturn(Collections.singletonList(average));
+
+		CorrectionPlan plan = service.buildCorrectionPlan(tenantId, currentOk);
+
+		assertTrue(!plan.isCorrectionRequired());
+		assertEquals(0, plan.getCyclesToCorrect().size());
 	}
 
 	private WaterBillingCycle cycle(String id, BillingBasis basis, long from, long to) {

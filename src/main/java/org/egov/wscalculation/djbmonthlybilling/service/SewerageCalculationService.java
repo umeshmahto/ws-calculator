@@ -65,13 +65,14 @@ public class SewerageCalculationService {
 
 		String category = normalize(context.getConsumerCategory());
 
-		return rules.stream().filter(Objects::nonNull).filter(r -> !Boolean.FALSE.equals(r.getActive()))
+		BigDecimal monthlyAmount = rules.stream().filter(Objects::nonNull).filter(r -> !Boolean.FALSE.equals(r.getActive()))
 				.filter(r -> !"WATER_CONNECTED".equalsIgnoreCase(r.getCode()))
 				.filter(r -> "ALL".equalsIgnoreCase(normalize(r.getCategory()))
 						|| category.equals(normalize(r.getCategory())))
 				.filter(r -> withinArea(r, context.getBuiltUpAreaSqm())).map(DJBMonthlySewerageRule::getAmount)
-				.filter(Objects::nonNull).findFirst().orElse(BigDecimal.ZERO)
-				.setScale(MONEY_SCALE, RoundingMode.HALF_UP);
+				.filter(Objects::nonNull).findFirst().orElse(BigDecimal.ZERO);
+
+		return money(monthlyAmount.multiply(BigDecimal.valueOf(resolveBillingMonths(context))));
 	}
 
 	private AdditionalChargeSelection calculateAdditional(SewerageCalculationContext context,
@@ -103,9 +104,10 @@ public class SewerageCalculationService {
 			SewerageCalculationContext context) {
 
 		String type = normalize(rule.getChargeType());
+		long billingMonths = resolveBillingMonths(context);
 
 		if ("FIXED_MONTHLY".equals(type)) {
-			return money(rule.getAmount());
+			return money(value(rule.getAmount()).multiply(BigDecimal.valueOf(billingMonths)));
 		}
 
 		if ("BASE_PLUS_PER_BLOCK".equals(type)) {
@@ -122,10 +124,10 @@ public class SewerageCalculationService {
 			int excess = Math.max(0, count - start + 1);
 			int blocks = excess == 0 ? 0 : (excess + blockSize - 1) / blockSize;
 
-			BigDecimal amount = value(rule.getBaseAmount())
+			BigDecimal monthlyAmount = value(rule.getBaseAmount())
 					.add(value(rule.getBlockAmount()).multiply(BigDecimal.valueOf(blocks)));
 
-			return money(amount);
+			return money(monthlyAmount.multiply(BigDecimal.valueOf(billingMonths)));
 		}
 
 		throw new IllegalArgumentException("Unsupported additional sewerage charge type: " + rule.getChargeType());
@@ -181,6 +183,13 @@ public class SewerageCalculationService {
 	private BigDecimal rangeStart(DJBAdditionalSewerageCharge rule) {
 		Integer value = rule.getFromRooms() != null ? rule.getFromRooms() : rule.getFromBeds();
 		return value == null ? BigDecimal.ZERO : BigDecimal.valueOf(value);
+	}
+
+	private long resolveBillingMonths(SewerageCalculationContext context) {
+		if (context == null || context.getBillingMonths() == null || context.getBillingMonths() <= 0) {
+			return 1L;
+		}
+		return context.getBillingMonths().longValue();
 	}
 
 	private BigDecimal money(BigDecimal value) {

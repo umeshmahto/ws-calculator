@@ -102,6 +102,11 @@ public class WaterBillingCycleDaoImpl implements WaterBillingCycleDao {
 	}
 
 	@Override
+	public List<WaterBillingCycle> findPreviousActualCyclesWithinPeriod(String t, String c, Long from, Long to, int l) {
+		return jdbcTemplate.query(queryBuilder.findPreviousActualCyclesWithinPeriod(), rowMapper, t, c, from, to, l);
+	}
+
+	@Override
 	public List<WaterBillingCycle> findCyclesForConnection(String t, String c, Long p, int l) {
 		return jdbcTemplate.query(queryBuilder.findCyclesForConnection(), rowMapper, t, c, p, l);
 	}

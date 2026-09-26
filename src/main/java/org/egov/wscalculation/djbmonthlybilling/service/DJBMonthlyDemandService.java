@@ -197,10 +197,14 @@ public class DJBMonthlyDemandService {
 
 		List<DJBMonthlyWaterTariff> tariffs = masterProvider.getWaterTariffs(requestInfo, tenantId);
 
-		TariffCalculationResult water = tariffCalculationService.calculate(consumption, category, tariffs);
+		long billingMonths = resolveTariffBillingMonths(cycle);
+		TariffCalculationResult water = tariffCalculationService.calculate(
+				consumption, category, tariffs, billingMonths, cycle.getBillingperiodfrom(), cycle.getBillingperiodto());
 
 		SewerageCalculationContext sewerageContext = SewerageCalculationContext.builder()
-				.waterVolumetricCharge(water.getWaterVolumetricCharge()).waterConnectionAvailable(true)
+				.waterVolumetricCharge(water.getWaterVolumetricCharge())
+				.billingMonths(water.getBillingMonths() == null ? 1 : water.getBillingMonths().intValue())
+				.waterConnectionAvailable(true)
 				.sewerConnectionAvailable(true).additionalWaterSource(isAdditionalWaterSource(connection))
 				.consumerCategory(category).propertyUsage(property.getUsageCategory())
 				.builtUpAreaSqm(property.getSuperBuiltUpArea()).build();
@@ -218,7 +222,9 @@ public class DJBMonthlyDemandService {
 
 		List<DJBMonthlyRebate> rebates = masterProvider.getRebates(requestInfo, tenantId);
 
-		RebateCalculationContext rebateContext = RebateCalculationContext.builder().consumption(consumption)
+		RebateCalculationContext rebateContext = RebateCalculationContext.builder()
+				.consumption(consumption)
+				.monthlyConsumption(water.getMonthlyConsumption())
 				.billingBasis(cycle.getBillingbasis()).readingQualityCode(cycle.getReadingqualitycode())
 				.consumerType(resolveConsumerType(category)).propertyCategory(resolvePropertyCategory(category))
 				.connectionType(category)
@@ -897,6 +903,28 @@ public class DJBMonthlyDemandService {
 			// Calculation snapshot status is audit metadata. A status-update failure must
 			// not roll back or mask an already successful demand/bill generation.
 		}
+	}
+
+	private long resolveTariffBillingMonths(WaterBillingCycle cycle) {
+		if (cycle == null) {
+			return 1L;
+		}
+
+		boolean actualBasis = BillingBasis.ACTUAL.equals(cycle.getBillingbasis())
+				|| BillingBasis.CORRECTED_ACTUAL.equals(cycle.getBillingbasis());
+		if (!actualBasis) {
+			// AVERAGE/PROVISIONAL billingConsumption is already a monthly amount.
+			// Never divide a monthly average by the wall-clock span of the meter-read
+			// cycle a second time.
+			return 1L;
+		}
+
+		long months = DJBConsumptionPeriodUtil.calculateBillingMonths(
+				cycle.getBillingperiodfrom(), cycle.getBillingperiodto());
+		if (months <= 0) {
+			throw new IllegalStateException("Unable to determine billing months for DJB billing cycle " + cycle.getId());
+		}
+		return months;
 	}
 
 	private String actorForDemand(RequestInfo requestInfo) {

@@ -12,7 +12,11 @@ import org.egov.wscalculation.djbmonthlybilling.model.enums.BillingBasis;
 @Builder
 public class RebateCalculationContext {
 
+    /** Raw meter/billing-period consumption retained for audit and non-monthly consumers. */
     private BigDecimal consumption;
+
+    /** Monthly-equivalent consumption used by DJB monthly-threshold rebate rules. */
+    private BigDecimal monthlyConsumption;
 
     private BillingBasis billingBasis;
 

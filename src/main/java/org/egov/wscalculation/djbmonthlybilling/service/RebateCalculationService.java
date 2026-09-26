@@ -165,18 +165,20 @@ public class RebateCalculationService {
 
 	private boolean isFreeWaterEligible(RebateCalculationContext context, DJBMonthlyRebate rule) {
 
-		if (context.getConsumption() == null || rule.getMaxConsumptionKl() == null) {
+		BigDecimal monthlyConsumption = resolveMonthlyConsumption(context);
+		if (monthlyConsumption == null || rule.getMaxConsumptionKl() == null) {
 			return false;
 		}
 
 		/*
-		 * For a non-bulk domestic connection the 20 KL ceiling applies directly.
-		 * For a bulk domestic connection DJB defines the free-water limit per
+		 * The 20 KL ceiling is monthly. For a non-bulk domestic connection the
+		 * normalized monthly consumption applies directly. For a bulk domestic
+		 * connection DJB defines the free-water limit per
 		 * dwelling unit, so the effective limit is 20 KL x dwelling units.
 		 * Do not apply the single-unit 20 KL check before the bulk calculation.
 		 */
 		if (!context.isBulkConnection()
-				&& context.getConsumption().compareTo(rule.getMaxConsumptionKl()) > 0) {
+				&& monthlyConsumption.compareTo(rule.getMaxConsumptionKl()) > 0) {
 			return false;
 		}
 
@@ -213,12 +215,26 @@ public class RebateCalculationService {
 			}
 			BigDecimal bulkLimit = rule.getMaxConsumptionKl()
 					.multiply(BigDecimal.valueOf(context.getDwellingUnitCount()));
-			if (context.getConsumption().compareTo(bulkLimit) > 0) {
+			if (monthlyConsumption.compareTo(bulkLimit) > 0) {
 				return false;
 			}
 		}
 
 		return true;
+	}
+
+	/**
+	 * DJB free-water eligibility is a monthly threshold. Production demand
+	 * generation supplies the normalized monthly consumption for multi-month
+	 * meter-reading cycles. For one-month/unit tests or legacy callers where the
+	 * normalized value is not supplied, the raw consumption remains the correct
+	 * monthly value.
+	 */
+	private BigDecimal resolveMonthlyConsumption(RebateCalculationContext context) {
+		if (context.getMonthlyConsumption() != null) {
+			return context.getMonthlyConsumption();
+		}
+		return context.getConsumption();
 	}
 
 	private boolean isEligibleReadingAndBasis(RebateCalculationContext context, DJBMonthlyRebate rule) {

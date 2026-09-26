@@ -16,4 +16,8 @@ public class SewerageCalculationContext {
     private BigDecimal builtUpAreaSqm;
     private Integer numberOfRooms;
     private Integer numberOfBeds;
+
+    /** Number of DJB billing months represented by the meter-to-meter cycle. */
+    @Builder.Default
+    private Integer billingMonths = 1;
 }

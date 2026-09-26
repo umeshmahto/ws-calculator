@@ -27,6 +27,9 @@ public interface WaterBillingCycleDao {
 	List<WaterBillingCycle> findPreviousActualCycles(String tenantId, String connectionNo, Long beforeBillingPeriodTo,
 			int limit);
 
+	List<WaterBillingCycle> findPreviousActualCyclesWithinPeriod(String tenantId, String connectionNo,
+			Long periodFromInclusive, Long periodToExclusive, int limit);
+
 	List<WaterBillingCycle> findCyclesForConnection(String tenantId, String connectionNo, Long beforeBillingPeriodTo,
 			int limit);
 

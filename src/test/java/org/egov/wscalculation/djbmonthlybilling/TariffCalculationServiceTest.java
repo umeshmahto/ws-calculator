@@ -80,6 +80,35 @@ class TariffCalculationServiceTest {
 		assertEquals(bd("43.93"), result.getSlabCharges().get(0).getRatePerKl());
 	}
 
+
+	@Test
+	void shouldCalculateThreeMonthConsumptionUsingMonthlyTariffBand() {
+		TariffCalculationResult result = service.calculate(
+				bd("60"), "DOMESTIC", Arrays.asList(domestic), 3);
+
+		assertEquals(bd("60.000"), result.getConsumption());
+		assertEquals(bd("20.000"), result.getMonthlyConsumption());
+		assertEquals(Long.valueOf(3L), result.getBillingMonths());
+		assertEquals(bd("316.20"), result.getWaterVolumetricCharge());
+		assertEquals(bd("439.23"), result.getServiceCharge());
+		assertEquals(bd("755.43"), result.getTotalWaterCharge());
+		assertEquals(bd("20.000"), result.getSlabCharges().get(0).getUnits());
+		assertEquals(bd("5.27"), result.getSlabCharges().get(0).getRatePerKl());
+	}
+
+	@Test
+	void shouldCalculateSixMonthConsumptionUsingMonthlyTariffBand() {
+		TariffCalculationResult result = service.calculate(
+				bd("180"), "DOMESTIC", Arrays.asList(domestic), 6);
+
+		assertEquals(bd("30.000"), result.getMonthlyConsumption());
+		assertEquals(Long.valueOf(6L), result.getBillingMonths());
+		assertEquals(bd("4744.80"), result.getWaterVolumetricCharge());
+		assertEquals(bd("1317.72"), result.getServiceCharge());
+		assertEquals(bd("6062.52"), result.getTotalWaterCharge());
+		assertEquals(bd("26.36"), result.getSlabCharges().get(0).getRatePerKl());
+	}
+
 	@Test
 	void shouldNormalizeResidentialToDomestic() {
 		TariffCalculationResult result = service.calculate(bd("20"), "residential", Arrays.asList(domestic));
@@ -127,6 +156,45 @@ class TariffCalculationServiceTest {
 		assertThrows(IllegalArgumentException.class,
 				() -> service.calculate(bd("25"), "DOMESTIC", Arrays.asList(invalid)));
 	}
+
+    @Test
+    void shouldSelectTariffByEffectiveDate() {
+        DJBMonthlyWaterTariff oldTariff = tariff("DOMESTIC", slab(0, 20, 5.27, 146.41));
+        oldTariff.setEffectiveFrom("2026-01-01");
+        oldTariff.setEffectiveTo("2026-06-30");
+
+        DJBMonthlyWaterTariff newTariff = tariff("DOMESTIC", slab(0, 20, 6.00, 150.00));
+        newTariff.setId("DOMESTIC_NEW");
+        newTariff.setEffectiveFrom("2026-07-01");
+        newTariff.setEffectiveTo(null);
+
+        TariffCalculationResult result = service.calculate(
+                bd("10"), "DOMESTIC", Arrays.asList(oldTariff, newTariff), 1, epoch("2026-08-01"));
+
+        assertEquals("DOMESTIC_NEW", result.getTariffId());
+        assertEquals(0, result.getSlabCharges().get(0).getRatePerKl().compareTo(bd("6.00")));
+    }
+
+    @Test
+    void shouldUseMonthlyAverageAsIsWhenBillingMonthsIsOne() {
+        TariffCalculationResult result = service.calculate(
+                bd("25"), "DOMESTIC", Arrays.asList(domestic), 1, epoch("2026-06-01"));
+        assertEquals(bd("25.000"), result.getMonthlyConsumption());
+    }
+
+    @Test
+    void shouldRejectBillingDateWithNoEffectiveTariff() {
+        DJBMonthlyWaterTariff oldTariff = tariff("DOMESTIC", slab(0, 20, 5.27, 146.41));
+        oldTariff.setEffectiveFrom("2026-01-01");
+        oldTariff.setEffectiveTo("2026-06-30");
+
+        assertThrows(IllegalArgumentException.class, () -> service.calculate(
+                bd("10"), "DOMESTIC", Arrays.asList(oldTariff), 1, epoch("2026-08-01")));
+    }
+
+    private Long epoch(String date) {
+        return java.time.ZonedDateTime.parse(date + "T00:00:00Z").toInstant().toEpochMilli();
+    }
 
 	private DJBMonthlyWaterTariff tariff(String category, DJBMonthlyWaterTariffSlab... slabs) {
 

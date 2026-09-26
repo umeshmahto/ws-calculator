@@ -200,6 +200,83 @@ class SewerageCalculationServiceTest {
                 result.getAdditionalSewerageCharge());
     }
 
+
+    @Test
+    void shouldMultiplyNoWaterMonthlySewerageChargeByBillingMonths() {
+        SewerageCalculationContext context =
+                SewerageCalculationContext.builder()
+                        .waterConnectionAvailable(false)
+                        .sewerConnectionAvailable(true)
+                        .consumerCategory("DOMESTIC")
+                        .builtUpAreaSqm(bd("100"))
+                        .billingMonths(3)
+                        .build();
+
+        DJBMonthlySewerageRule flat = regularRule(
+                "NO_WATER_CAT_I_SMALL", "DOMESTIC", "FIXED_MONTHLY", null, 0.0, 200, 150);
+
+        SewerageCalculationResult result = service.calculate(
+                context, Arrays.asList(flat), Arrays.asList());
+
+        assertEquals(bd("450.00"), result.getRegularSewerageCharge());
+        assertEquals(bd("450.00"), result.getTotalSewerageCharge());
+    }
+
+    @Test
+    void shouldMultiplyFixedAdditionalSewerageByBillingMonths() {
+        SewerageCalculationContext context =
+                SewerageCalculationContext.builder()
+                        .waterVolumetricCharge(bd("100"))
+                        .waterConnectionAvailable(true)
+                        .sewerConnectionAvailable(true)
+                        .additionalWaterSource(true)
+                        .propertyUsage("HOTEL_GUEST_HOUSE")
+                        .numberOfRooms(40)
+                        .billingMonths(3)
+                        .build();
+
+        DJBAdditionalSewerageCharge hotel =
+                additionalFixed("HOTEL_0_50", "HOTEL_GUEST_HOUSE", 0, 50, 2000);
+
+        SewerageCalculationResult result = service.calculate(
+                context, Arrays.asList(waterConnected), Arrays.asList(hotel));
+
+        assertEquals(bd("60.00"), result.getRegularSewerageCharge());
+        assertEquals(bd("6000.00"), result.getAdditionalSewerageCharge());
+        assertEquals(bd("6060.00"), result.getTotalSewerageCharge());
+    }
+
+    @Test
+    void shouldMultiplyBlockBasedAdditionalSewerageByBillingMonths() {
+        SewerageCalculationContext context =
+                SewerageCalculationContext.builder()
+                        .waterVolumetricCharge(bd("100"))
+                        .waterConnectionAvailable(true)
+                        .sewerConnectionAvailable(true)
+                        .additionalWaterSource(true)
+                        .propertyUsage("HOTEL_GUEST_HOUSE")
+                        .numberOfRooms(101)
+                        .billingMonths(4)
+                        .build();
+
+        DJBAdditionalSewerageCharge hotel = new DJBAdditionalSewerageCharge();
+        hotel.setCode("HOTEL_ABOVE_100");
+        hotel.setPropertyUsage("HOTEL_GUEST_HOUSE");
+        hotel.setFromRooms(101);
+        hotel.setChargeType("BASE_PLUS_PER_BLOCK");
+        hotel.setBaseAmount(bd("10000"));
+        hotel.setBlockAmount(bd("2500"));
+        hotel.setBlockSize(50);
+        hotel.setActive(true);
+
+        SewerageCalculationResult result = service.calculate(
+                context, Arrays.asList(waterConnected), Arrays.asList(hotel));
+
+        assertEquals(bd("60.00"), result.getRegularSewerageCharge());
+        assertEquals(bd("50000.00"), result.getAdditionalSewerageCharge());
+        assertEquals(bd("50060.00"), result.getTotalSewerageCharge());
+    }
+
     private DJBMonthlySewerageRule regularRule(
             String code,
             String category,

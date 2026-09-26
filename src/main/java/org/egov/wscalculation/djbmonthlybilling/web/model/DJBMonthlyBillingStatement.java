@@ -132,6 +132,8 @@ public class DJBMonthlyBillingStatement {
 	@AllArgsConstructor
 	public static class WaterCharges {
 		private BigDecimal consumption;
+		private BigDecimal monthlyConsumption;
+		private Long billingMonths;
 		private String unit;
 		private String tariffId;
 		private String category;
