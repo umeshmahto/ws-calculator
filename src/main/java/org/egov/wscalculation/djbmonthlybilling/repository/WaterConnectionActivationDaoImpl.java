@@ -2,36 +2,39 @@ package org.egov.wscalculation.djbmonthlybilling.repository;
 
 import java.util.List;
 
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 @Repository
 public class WaterConnectionActivationDaoImpl implements WaterConnectionActivationDao {
 
-    private static final String FIND_ACTIVATION_DATE =
-            "SELECT MIN(CASE WHEN dateEffectiveFrom IS NOT NULL AND dateEffectiveFrom > 0 "
-                    + "THEN dateEffectiveFrom END) AS activation_date "
-                    + "FROM eg_ws_connection "
-                    + "WHERE tenantid = ? AND connectionno = ?";
-
     private final JdbcTemplate jdbcTemplate;
 
-    @Autowired
     public WaterConnectionActivationDaoImpl(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
     }
 
     @Override
     public Long findActivationDate(String tenantId, String connectionNo) {
-        List<Long> result = jdbcTemplate.query(
-                FIND_ACTIVATION_DATE,
-                (rs, rowNum) -> rs.getObject("activation_date") == null
-                        ? null
-                        : rs.getLong("activation_date"),
-                tenantId,
-                connectionNo);
+        /*
+         * dateEffectiveFrom belongs to eg_ws_connection.
+         * connectionExecutionDate belongs to eg_ws_service (wc), not eg_ws_connection.
+         * Prefer the actual connection execution date for activation-age calculations,
+         * then fall back to dateEffectiveFrom when execution date is unavailable.
+         */
+        String sql = "SELECT COALESCE(NULLIF(wc.connectionExecutionDate, 0), "
+                + "NULLIF(conn.dateEffectiveFrom, 0)) AS activation_date "
+                + "FROM eg_ws_connection conn "
+                + "LEFT JOIN eg_ws_service wc ON wc.connection_id = conn.id "
+                + "WHERE conn.tenantid = ? "
+                + "AND conn.connectionNo = ? "
+                + "ORDER BY conn.createdTime ASC LIMIT 1";
 
-        return result.isEmpty() ? null : result.get(0);
+        List<Long> dates = jdbcTemplate.query(sql, (rs, rowNum) -> {
+            long value = rs.getLong("activation_date");
+            return rs.wasNull() ? null : value;
+        }, tenantId, connectionNo);
+
+        return dates.isEmpty() ? null : dates.get(0);
     }
 }

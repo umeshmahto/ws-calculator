@@ -123,7 +123,8 @@ public class DJBMonthlyBillingCalculationSnapshotService {
 				: new BigDecimal("1.5");
 		Long normalizationFrom = DJBConsumptionPeriodUtil.resolveNormalizationStart(
 				cycle.getPreviousokreadingdate(), cycle.getBillingperiodfrom());
-		BigDecimal billingDays = DJBConsumptionPeriodUtil.calculateElapsedDays(normalizationFrom, cycle.getBillingperiodto());
+		BigDecimal billingDays = DJBConsumptionPeriodUtil.calculateElapsedDays(cycle.getBillingperiodfrom(), cycle.getBillingperiodto());
+		BigDecimal normalizationDays = DJBConsumptionPeriodUtil.calculateElapsedDays(normalizationFrom, cycle.getBillingperiodto());
 		BigDecimal monthlyConsumption = DJBConsumptionPeriodUtil.toMonthlyConsumption(cycle.getActualconsumption(),
 				normalizationFrom, cycle.getBillingperiodto());
 		BigDecimal threshold = cycle.getPreviousconsumption() == null ? null
@@ -181,7 +182,7 @@ public class DJBMonthlyBillingCalculationSnapshotService {
 						.evaluated(cycle.getPreviousconsumption() != null && monthlyConsumption != null)
 						.multiplier(multiplier).previousConsumption(cycle.getPreviousconsumption())
 						.thresholdConsumption(threshold).actualConsumption(cycle.getActualconsumption())
-						.monthlyConsumption(monthlyConsumption).billingDays(billingDays)
+						.monthlyConsumption(monthlyConsumption).billingDays(normalizationDays)
 						.exceeded(exceeded).minimumZroConsumption(minimumZroConsumption).zroRequired(true)
 						.reason("Monthly-equivalent consumption exceeds the configured 1.5x threshold and is at/above the ZRO minimum; verification is pending.")
 						.build())
@@ -267,7 +268,8 @@ public class DJBMonthlyBillingCalculationSnapshotService {
 				: new BigDecimal("1.5");
 		Long normalizationFrom = DJBConsumptionPeriodUtil.resolveNormalizationStart(
 				cycle.getPreviousokreadingdate(), cycle.getBillingperiodfrom());
-		BigDecimal billingDays = DJBConsumptionPeriodUtil.calculateElapsedDays(normalizationFrom, cycle.getBillingperiodto());
+		BigDecimal billingDays = DJBConsumptionPeriodUtil.calculateElapsedDays(cycle.getBillingperiodfrom(), cycle.getBillingperiodto());
+		BigDecimal normalizationDays = DJBConsumptionPeriodUtil.calculateElapsedDays(normalizationFrom, cycle.getBillingperiodto());
 		BigDecimal monthlyConsumption = DJBConsumptionPeriodUtil.toMonthlyConsumption(cycle.getActualconsumption(),
 				normalizationFrom, cycle.getBillingperiodto());
 		BigDecimal threshold = cycle.getPreviousconsumption() == null ? null
@@ -386,7 +388,7 @@ public class DJBMonthlyBillingCalculationSnapshotService {
 						.evaluated(cycle.getPreviousconsumption() != null && monthlyConsumption != null)
 						.multiplier(multiplier).previousConsumption(cycle.getPreviousconsumption())
 						.thresholdConsumption(threshold).actualConsumption(cycle.getActualconsumption())
-						.monthlyConsumption(monthlyConsumption).billingDays(billingDays)
+						.monthlyConsumption(monthlyConsumption).billingDays(normalizationDays)
 						.exceeded(onePointFiveExceeded).minimumZroConsumption(minimumZroConsumption)
 						.zroRequired(zroRequired).reason(buildOnePointFiveReason(cycle, threshold, zroRequired))
 						.build())
