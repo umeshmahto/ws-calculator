@@ -16,11 +16,18 @@ import java.util.Map;
 @NoArgsConstructor
 @AllArgsConstructor
 public class WaterDemandResult {
+    private BigDecimal rawOccupancy;
     private BigDecimal calculatedOccupancy;
     private BigDecimal chosenLpcd;
     private BigDecimal baseDemand;
     private BigDecimal contingencyPercentage;
     private BigDecimal totalWaterDemand;
+
+    // Source LPCD values retained for an auditable IFC calculation trace.
+    private BigDecimal standardTotalLpcd;
+    private BigDecimal potableLpcd;
+    private BigDecimal nonPotableLpcd;
+    private Boolean potableThresholdApplied;
 
     private String matchedNormCode;
     private String matchedNormName;

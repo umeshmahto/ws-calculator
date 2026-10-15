@@ -61,16 +61,14 @@ public class MeterServicesImpl implements MeterService {
 		if(meterConnectionRequest.getMeterReading().getGenerateDemand()){
 			if ("dl.djb".equalsIgnoreCase(meterConnectionRequest.getMeterReading().getTenantId())) {
 				djbShadowMeterBillingService.resolveAndApplyLastValidReading(meterConnectionRequest.getMeterReading());
-				djbShadowMeterBillingService.normalizeAverageReadingForPersistence(
-						meterConnectionRequest.getMeterReading(), meterConnectionRequest.getRequestInfo());
+				djbShadowMeterBillingService.normalizeAverageReadingForPersistence(meterConnectionRequest.getMeterReading(), meterConnectionRequest.getRequestInfo());
 			}
 			wsCalulationWorkflowValidator.applicationValidation(meterConnectionRequest.getRequestInfo(),meterConnectionRequest.getMeterReading().getTenantId(),meterConnectionRequest.getMeterReading().getConnectionNo(),genratedemand);
 			wsCalculationValidator.validateMeterReading(meterConnectionRequest.getRequestInfo(),meterConnectionRequest.getMeterReading(), true);
 		}
 		enrichmentService.enrichMeterReadingRequest(meterConnectionRequest.getRequestInfo(),meterConnectionRequest.getMeterReading());
 
-		if (meterConnectionRequest.getMeterReading().getGenerateDemand()
-				&& "dl.djb".equalsIgnoreCase(meterConnectionRequest.getMeterReading().getTenantId())) {
+		if (meterConnectionRequest.getMeterReading().getGenerateDemand() && "dl.djb".equalsIgnoreCase(meterConnectionRequest.getMeterReading().getTenantId())) {
 			djbShadowMeterBillingService.prepareBillingCycleReservation(
 						meterConnectionRequest.getMeterReading(),
 						meterConnectionRequest.getRequestInfo());

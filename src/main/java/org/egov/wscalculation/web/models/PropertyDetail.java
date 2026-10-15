@@ -44,12 +44,6 @@ public class PropertyDetail {
     @JsonProperty("superBuiltUpArea")
     private BigDecimal superBuiltUpArea;
 
-    @JsonProperty("farArea")
-    private BigDecimal farArea;
-
-    @JsonProperty("coveredArea")
-    private BigDecimal coveredArea;
-
     @JsonProperty("numberOfDwellingUnits")
     private BigDecimal numberOfDwellingUnits;
 

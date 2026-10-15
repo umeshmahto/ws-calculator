@@ -286,7 +286,7 @@ public class CalculatorUtil {
 	    wsMasters.add(MasterDetail.builder().name(WSCalculationConstant.WC_FEESLAB_MASTER).filter("[?(@.isActive==true)]").build());
 	    wsMasters.add(MasterDetail.builder().name(WSCalculationConstant.WC_ROADTYPE_MASTER).filter("[?(@.isActive==true)]").build());
 	    wsMasters.add(MasterDetail.builder().name(WSCalculationConstant.WC_INFRASTRUCTURE_CHARGE_MASTER).filter("[?(@.active==true)]").build());
-	    wsMasters.add(MasterDetail.builder().name(WSCalculationConstant.WATER_DEMAND_NORMS).filter("[?(@.isActive==true)]").build());
+	    wsMasters.add(MasterDetail.builder().name(WSCalculationConstant.WATER_DEMAND_NORMS_V2).filter("[?(@.isActive==true)]").build());
 
 	    
 	    moduleDetails.add(ModuleDetail.builder().moduleName(WSCalculationConstant.WS_TAX_MODULE).masterDetails(wsMasters).build());
@@ -296,6 +296,7 @@ public class CalculatorUtil {
 	     * ------------------------------------------------------------------ */
 	    List<MasterDetail> propertyMasters = new ArrayList<>();
 	    propertyMasters.add(MasterDetail.builder().name(WSCalculationConstant.WC_PROPERTY_TYPE_MASTER).filter("[?(@.active==true)]").build());
+	    propertyMasters.add(MasterDetail.builder().name("PropertyType2").filter("[?(@.active==true)]").build());
 	    propertyMasters.add(MasterDetail.builder().name(WSCalculationConstant.WC_PROPERTY_NEW_USAGE_TYPE_MASTER).filter("[?(@.active==true)]").build());
 	    
 	    moduleDetails.add(ModuleDetail.builder().moduleName(WSCalculationConstant.PROPERTY_TAX_MODULE).masterDetails(propertyMasters).build());

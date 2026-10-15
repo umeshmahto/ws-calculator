@@ -74,6 +74,10 @@ public class EstimationRequest {
 
     @JsonProperty("numberOfStaff")
     private BigDecimal numberOfStaff; // Offices
+
+    /** Total strength including students and staff; for double-shift schools this must include both shifts. */
+    @JsonProperty("totalStrengthIncludingStaffAndStudents")
+    private BigDecimal totalStrengthIncludingStaffAndStudents;
     
     @JsonProperty("servantQuarterArea")
     private Double servantQuarterArea; // Servant

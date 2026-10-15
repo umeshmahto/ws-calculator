@@ -508,6 +508,9 @@ public class MasterDataService {
 		
 		// Add WS.DISCONNECTION tax heads and periods
 		addServiceTaxHeadsAndPeriods(requestInfo, tenantId, "WS.DISCONNECTION", master);
+
+		// Add WSReconnection tax heads and periods
+		addServiceTaxHeadsAndPeriods(requestInfo, tenantId, "WSReconnection", master);
 		
 		MdmsResponse response = mapper.convertValue(
 				repository.fetchResult(calculatorUtils.getMdmsSearchUrl(),

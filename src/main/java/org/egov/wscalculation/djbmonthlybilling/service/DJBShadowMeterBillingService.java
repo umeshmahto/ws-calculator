@@ -133,8 +133,7 @@ public class DJBShadowMeterBillingService {
 	 * synthetic value is never treated as actual consumption.
 	 */
 	public void normalizeAverageReadingForPersistence(MeterReading reading, RequestInfo requestInfo) {
-		if (reading == null || !"dl.djb".equalsIgnoreCase(reading.getTenantId())
-				|| !StringUtils.hasText(reading.getReadingQualityCode())) {
+		if (reading == null || !"dl.djb".equalsIgnoreCase(reading.getTenantId()) || !StringUtils.hasText(reading.getReadingQualityCode())) {
 			return;
 		}
 
@@ -146,9 +145,7 @@ public class DJBShadowMeterBillingService {
 		}
 
 		if (reading.getLastReading() == null) {
-			throw new IllegalArgumentException(
-					"Last reading is required for DJB average-billing reading quality code: "
-							+ reading.getReadingQualityCode());
+			throw new IllegalArgumentException("Last reading is required for DJB average-billing reading quality code: "+ reading.getReadingQualityCode());
 		}
 
 		// Synthetic persistence value only. ConsumptionService uses BillingBasis.AVERAGE

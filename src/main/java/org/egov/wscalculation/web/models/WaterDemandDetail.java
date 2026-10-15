@@ -34,6 +34,21 @@ public class WaterDemandDetail {
     @JsonProperty("chosenLpcd")
     private BigDecimal chosenLpcd;
 
+    @JsonProperty("standardTotalLpcd")
+    private BigDecimal standardTotalLpcd;
+
+    @JsonProperty("potableLpcd")
+    private BigDecimal potableLpcd;
+
+    @JsonProperty("nonPotableLpcd")
+    private BigDecimal nonPotableLpcd;
+
+    @JsonProperty("ifcCalculationBasis")
+    private String ifcCalculationBasis;
+
+    @JsonProperty("potableThresholdApplied")
+    private Boolean potableThresholdApplied;
+
     @JsonProperty("baseDemand")
     private BigDecimal baseDemand;
 

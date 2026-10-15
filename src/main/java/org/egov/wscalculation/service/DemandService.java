@@ -271,9 +271,7 @@ public class DemandService {
 		List<Demand> demandRes = demandRepository.saveDemand(requestInfo, demands,notificationObj);
 		log.info("Demand Response for WSREconnection is " +demandRes);
 		
-		if(calculationReq.getIsReconnectionRequest())
-			fetchBillForReconnect(demandRes, requestInfo, masterMap);
-		else if(isForConnectionNO && ! calculationReq.getIsReconnectionRequest())
+	  if(isForConnectionNO && ! calculationReq.getIsReconnectionRequest())
 			fetchBill(demandRes, requestInfo, masterMap);
 		
 		return demandRes;

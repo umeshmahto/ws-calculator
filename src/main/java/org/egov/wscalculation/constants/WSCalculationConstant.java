@@ -429,7 +429,7 @@ public class WSCalculationConstant {
 	// ------------------------------
 
 	public static final String WC_INFRASTRUCTURE_CHARGE_MASTER = "InfrastructureCharge";
-	public static final String WATER_DEMAND_NORMS = "WaterDemandNorms";
+	public static final String WATER_DEMAND_NORMS_V2 = "WaterDemandNorms2";
 
 	public static final String WATER_RATE_PER_LPD = "waterRatePerLPD";
 	public static final String SEWER_RATE_PER_LPD = "sewerRatePerLPD";

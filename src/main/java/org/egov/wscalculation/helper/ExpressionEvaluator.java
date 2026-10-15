@@ -108,7 +108,11 @@ public class ExpressionEvaluator {
             String[] parts = condition.split("==");
             return evaluateExpression(parts[0], context).compareTo(evaluateExpression(parts[1], context)) == 0;
         }
-        return false;
+
+        // Configuration formulas may use a numeric flag directly, for example
+        // IF(sanctioned_beds_is_specified, sanctioned_beds, fallback_formula).
+        // Context flags are represented as 1 (true) and 0 (false).
+        return evaluateExpression(condition, context).compareTo(BigDecimal.ZERO) != 0;
     }
 
     private int findTopLevelOperator(String expr, List<String> operators) {

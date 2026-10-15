@@ -14,6 +14,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import org.egov.common.contract.request.RequestInfo;
 import org.egov.tracer.model.CustomException;
 import org.egov.wscalculation.constants.WSCalculationConstant;
+import org.egov.wscalculation.helper.UsageCodeResolver;
 import org.egov.wscalculation.web.models.*;
 import org.egov.wscalculation.util.CalculatorUtil;
 import org.egov.wscalculation.util.ResponseInfoFactory;
@@ -56,6 +57,9 @@ public class EstimationService {
 
 	@Autowired
 	private WaterDemandCalculator waterDemandCalculator;
+
+	@Autowired
+	private UsageCodeResolver usageCodeResolver;
 	
 	@Autowired
     private ResponseInfoFactory responseInfoFactory;
@@ -833,7 +837,7 @@ public class EstimationService {
 		    infraBreakdown.put("waterDemandLPD", waterDemandLPD);
 
 		    // YAHAN WATER DEMAND KA LOG SPECS INJECT KAREIN
-		    Map<String, Object> demandTrace = waterDemandCalculator.traceWaterDemandLogDetails(property, masterData);
+		    Map<String, Object> demandTrace = waterDemandCalculator.traceWaterDemandLogDetails(property, waterDemand);
 		    infraBreakdown.put("waterDemandCalculationTrace", demandTrace);
 
 		    infraBreakdown.put("waterRatePerLPD", waterRate.setScale(2, RoundingMode.HALF_UP));
@@ -858,17 +862,26 @@ public class EstimationService {
 		
 		Map<String, BigDecimal> contextVars = waterDemand.getContextVariables() != null ? waterDemand.getContextVariables() : new HashMap<>();
 		PropertyDetail propertyDetail = buildPropertyDetail(property, colonyCategory, contextVars);
+		// Keep area inputs available to the internal calculation engine, but do not expose
+		// FAR/covered-area aliases in the public calculation response.
+		Map<String, BigDecimal> responseContextVars = sanitizeAreaFieldsForResponse(contextVars);
 
 		WaterDemandDetail demandDetail = WaterDemandDetail.builder()
 		        .matchedNormCode(waterDemand.getMatchedNormCode())
 		        .matchedNormName(waterDemand.getMatchedNormName())
 		        .formulaUsed(waterDemand.getFormulaUsed())
+		        .rawOccupancy(waterDemand.getRawOccupancy())
 		        .calculatedOccupancy(waterDemand.getCalculatedOccupancy())
 		        .chosenLpcd(waterDemand.getChosenLpcd())
+		        .standardTotalLpcd(waterDemand.getStandardTotalLpcd())
+		        .potableLpcd(waterDemand.getPotableLpcd())
+		        .nonPotableLpcd(waterDemand.getNonPotableLpcd())
+		        .ifcCalculationBasis(waterDemand.getCalculationBasisApplied())
+		        .potableThresholdApplied(waterDemand.getPotableThresholdApplied())
 		        .baseDemand(waterDemand.getBaseDemand())
 		        .contingencyPercentage(waterDemand.getContingencyPercentage())
 		        .totalWaterDemandLPD(waterDemandLPD)
-		        .contextVariables(contextVars)
+		        .contextVariables(responseContextVars)
 		        .build();
 
 		InfrastructureChargeDetail infraDetail = InfrastructureChargeDetail.builder()
@@ -907,6 +920,26 @@ public class EstimationService {
 	}
 
 
+    /**
+     * Removes response-only area aliases while leaving the original context untouched
+     * for norm formulas (e.g. built_up_area).
+     */
+    private Map<String, BigDecimal> sanitizeAreaFieldsForResponse(Map<String, BigDecimal> contextVars) {
+        Map<String, BigDecimal> sanitized = new LinkedHashMap<>();
+        if (contextVars != null) {
+            sanitized.putAll(contextVars);
+        }
+        sanitized.keySet().removeIf(key -> {
+            if (key == null) {
+                return false;
+            }
+            String normalized = key.replace("_", "").replace("-", "").replace(" ", "")
+                    .toLowerCase(Locale.ROOT);
+            return "fararea".equals(normalized) || "coveredarea".equals(normalized);
+        });
+        return sanitized;
+    }
+
 	private PropertyDetail buildPropertyDetail(Property property, String colonyCategory, Map<String, BigDecimal> contextVars) {
 	    if (property == null) {
 	        return null;
@@ -930,8 +963,6 @@ public class EstimationService {
 	            // Physical & Dimension attributes
 	            .landArea(property.getLandArea() != null ? BigDecimal.valueOf(property.getLandArea()) : BigDecimal.ZERO)
 	            .superBuiltUpArea(property.getSuperBuiltUpArea() != null ? property.getSuperBuiltUpArea() : BigDecimal.ZERO)
-	            .farArea(contextVars.getOrDefault("far_area", BigDecimal.ZERO))
-	            .coveredArea(contextVars.getOrDefault("covered_area", BigDecimal.ZERO))
 	            // Occupancy context variables used in calculations
 	            .numberOfDwellingUnits(contextVars.getOrDefault("total_du", BigDecimal.ZERO))
 	            .numberOfBeds(contextVars.getOrDefault("total_beds", BigDecimal.ZERO))
@@ -1125,15 +1156,117 @@ public class EstimationService {
 		
 		JSONObject feeObj = mapper.convertValue(feeSlab.get(0), JSONObject.class);
 		BigDecimal reconnectionCharge = BigDecimal.ZERO;
-		
-		if (feeObj.get(WSCalculationConstant.RECONNECTION_FEE_CONST) != null) {
-			reconnectionCharge = new BigDecimal(feeObj.getAsNumber(WSCalculationConstant.RECONNECTION_FEE_CONST).toString());
+
+		String taxHeadCode = WSCalculationConstant.WS_RECONNECTION_CHARGE;
+
+		String requestConnectionCategory = null;
+		if (criteria.getWaterConnection() != null) {
+			requestConnectionCategory = criteria.getWaterConnection().getConnectionCategory();
+			if ((requestConnectionCategory == null || requestConnectionCategory.trim().isEmpty()) && criteria.getWaterConnection().getAdditionalDetails() != null) {
+				try {
+					JSONObject additionalDetails = mapper.convertValue(criteria.getWaterConnection().getAdditionalDetails(), JSONObject.class);
+					if (additionalDetails != null) {
+						requestConnectionCategory = additionalDetails.getAsString("categoryType");
+					}
+				} catch (Exception e) {
+					log.error("[WS-RECONNECTION-ESTIMATE] Error reading categoryType from additionalDetails", e);
+				}
+			}
+		}
+		requestConnectionCategory = normalizeConnectionCategory(requestConnectionCategory);
+
+		log.info("[WS-RECONNECTION-ESTIMATE] Searching FeeSlab for reconnection, connectionCategory={}", requestConnectionCategory);
+
+		for (Object obj : feeSlab) {
+			try {
+				JSONObject fee = mapper.convertValue(obj, JSONObject.class);
+				Boolean isActive = (Boolean) fee.get("isActive");
+				if (Boolean.FALSE.equals(isActive)) {
+					continue;
+				}
+
+				String feeComponent = fee.getAsString(WSCalculationConstant.FEE_COMPONENT);
+				if (!"REOPENING_FEE".equalsIgnoreCase(feeComponent) && !"reopeningFee".equalsIgnoreCase(feeComponent)
+						&& !"RECONNECTION_FEE".equalsIgnoreCase(feeComponent) && !"reconnectionFee".equalsIgnoreCase(feeComponent)) {
+					continue;
+				}
+
+				String mdmsConnectionCategory = fee.getAsString(WSCalculationConstant.CONNECTION_CATEGORY);
+				if (mdmsConnectionCategory != null && requestConnectionCategory != null
+						&& !mdmsConnectionCategory.equalsIgnoreCase(requestConnectionCategory)) {
+					continue;
+				}
+
+				BigDecimal amount = BigDecimal.ZERO;
+				if (fee.get(WSCalculationConstant.AMOUNT) != null) {
+					amount = new BigDecimal(fee.getAsNumber(WSCalculationConstant.AMOUNT).toString());
+				}
+
+				if (amount.compareTo(BigDecimal.ZERO) > 0) {
+					reconnectionCharge = amount;
+					String mdmsTaxHead = fee.getAsString(WSCalculationConstant.TAX_HEAD_CODE);
+					if (mdmsTaxHead != null && !"WS_REOPENING_FEE".equalsIgnoreCase(mdmsTaxHead)) {
+						taxHeadCode = mdmsTaxHead;
+					} else {
+						taxHeadCode = WSCalculationConstant.WS_RECONNECTION_CHARGE;
+					}
+					log.info("[WS-RECONNECTION-ESTIMATE] Matched Reconnection Fee: amount={}, taxHeadCode={}, category={}",
+							amount, taxHeadCode, mdmsConnectionCategory);
+					break;
+				}
+			} catch (Exception e) {
+				log.error("[WS-RECONNECTION-ESTIMATE] Error parsing fee slab", e);
+			}
+		}
+
+		// Fallback: If category didn't match, check any active REOPENING_FEE slab
+		if (reconnectionCharge.compareTo(BigDecimal.ZERO) == 0) {
+			for (Object obj : feeSlab) {
+				try {
+					JSONObject fee = mapper.convertValue(obj, JSONObject.class);
+					Boolean isActive = (Boolean) fee.get("isActive");
+					if (Boolean.FALSE.equals(isActive)) {
+						continue;
+					}
+
+					String feeComponent = fee.getAsString(WSCalculationConstant.FEE_COMPONENT);
+					if ("REOPENING_FEE".equalsIgnoreCase(feeComponent) || "reopeningFee".equalsIgnoreCase(feeComponent)
+							|| "RECONNECTION_FEE".equalsIgnoreCase(feeComponent) || "reconnectionFee".equalsIgnoreCase(feeComponent)) {
+						if (fee.get(WSCalculationConstant.AMOUNT) != null) {
+							BigDecimal amount = new BigDecimal(fee.getAsNumber(WSCalculationConstant.AMOUNT).toString());
+							if (amount.compareTo(BigDecimal.ZERO) > 0) {
+								reconnectionCharge = amount;
+								String mdmsTaxHead = fee.getAsString(WSCalculationConstant.TAX_HEAD_CODE);
+								if (mdmsTaxHead != null && !"WS_REOPENING_FEE".equalsIgnoreCase(mdmsTaxHead)) {
+									taxHeadCode = mdmsTaxHead;
+								} else {
+									taxHeadCode = WSCalculationConstant.WS_RECONNECTION_CHARGE;
+								}
+								log.info("[WS-RECONNECTION-ESTIMATE] Fallback matched Reconnection Fee: amount={}, taxHeadCode={}",
+										amount, taxHeadCode);
+								break;
+							}
+						}
+					}
+				} catch (Exception e) {
+					log.error("[WS-RECONNECTION-ESTIMATE] Error parsing fallback fee slab", e);
+				}
+			}
+		}
+
+		// Final safety net: if MDMS returned 0 for reopening, use 250 default
+		if (reconnectionCharge.compareTo(BigDecimal.ZERO) == 0) {
+			reconnectionCharge = new BigDecimal("250.00");
+			taxHeadCode = WSCalculationConstant.WS_RECONNECTION_CHARGE;
+			log.warn("[WS-RECONNECTION-ESTIMATE] No amount found in FeeSlab, defaulted to 250.00");
 		}
 		
 		List<TaxHeadEstimate> estimates = new ArrayList<>();
 
-		estimates.add(TaxHeadEstimate.builder().taxHeadCode(WSCalculationConstant.WS_RECONNECTION_CHARGE)
-				.estimateAmount(reconnectionCharge).build());
+		estimates.add(TaxHeadEstimate.builder()
+		.taxHeadCode(taxHeadCode)
+		.estimateAmount(reconnectionCharge.setScale(2, RoundingMode.HALF_UP))
+		.build());
 		return estimates;
 
 	}
@@ -1143,11 +1276,8 @@ public class EstimationService {
 	    
 	    Map<String, Object> masterData = masterDataService.loadExemptionMaster(request.getRequestInfo(), tenantId);
 
-	    String usageTypeToValidate = StringUtils.hasText(request.getWaterConnectionUsageType()) 
-	            ? request.getWaterConnectionUsageType() 
-	            : request.getUsageCategory();
-
-	    String extractedDemandNormCode = validateAndExtractDemandNormCode(masterData, usageTypeToValidate);
+	    String extractedDemandNormCode = validateAndExtractDemandNormCode(masterData,
+	            request.getPropertyType(), request.getUsageCategory(), request.getPropertyCategory());
 	    validateColonyCategory(masterData, request.getColonyCategory());
 
 	    Map<String, Object> additionalDetails = new LinkedHashMap<>();
@@ -1192,6 +1322,9 @@ public class EstimationService {
 	    }
 	    if (request.getNumberOfStaff() != null) {
 	        additionalDetails.put("numberOfStaff", request.getNumberOfStaff());
+	    }
+	    if (request.getTotalStrengthIncludingStaffAndStudents() != null) {
+	        additionalDetails.put("totalStrengthIncludingStaffAndStudents", request.getTotalStrengthIncludingStaffAndStudents());
 	    }
 	    if (request.getServantQuarterArea() != null) {
 	        additionalDetails.put("servantQuarterArea", request.getServantQuarterArea());
@@ -1350,59 +1483,37 @@ public class EstimationService {
 	}
 
 	/**
-	 * Validates usage category against MDMS PropertyNewUsageType
-	 * and extracts corresponding demandNormCode with fallback.
+	 * Resolves the selected property/usage class through explicit MDMS demandNormCode
+	 * or subCategoryCode mappings. Legacy infrastructureCategory is not reused as
+	 * a substitute because the revised WaterDemandNorms2 classification differs.
 	 */
-	private String validateAndExtractDemandNormCode(Map<String, Object> masterData, String rawUsageType) {
-	    if (!StringUtils.hasText(rawUsageType)) {
-	        throw new CustomException("INVALID_USAGE_CATEGORY", "Usage Category cannot be empty for charge estimation.");
-	    }
-
+	private String validateAndExtractDemandNormCode(Map<String, Object> masterData, String propertyType,
+			String usageCategory, String propertyCategory) {
 	    if (masterData == null || masterData.isEmpty()) {
 	        throw new CustomException("MDMS_DATA_ERROR", "Master Data is null or empty.");
 	    }
-
-	    // Direct Extraction
-	    List<Map<String, Object>> usageTypes = (List<Map<String, Object>>) masterData.get("PropertyNewUsageType");
-
-	    if (CollectionUtils.isEmpty(usageTypes)) {
-	        throw new CustomException("MDMS_DATA_EMPTY", "PropertyNewUsageType master data is missing or empty in MDMS.");
+	    if (!usageCodeResolver.hasWaterDemandNorms2Master(masterData)
+	            || usageCodeResolver.extractWaterDemandNorms2(masterData).isEmpty()) {
+	        throw new CustomException("WATER_DEMAND_NORMS_NOT_FOUND",
+	                "Active WaterDemandNorms2 configuration is missing. Configure the revised A/B/C norms in MDMS.");
 	    }
 
 	    try {
-	        String fallbackNormCode = null;
-
-	        for (Map<String, Object> usage : usageTypes) {
-	            if (usage == null) continue;
-
-	            Boolean isActive = usage.get("active") != null ? Boolean.parseBoolean(usage.get("active").toString()) : true;
-	            if (Boolean.FALSE.equals(isActive)) continue;
-	            String code = usage.get("code") != null ? usage.get("code").toString() : "";
-	            String normCode = usage.get("demandNormCode") != null ? usage.get("demandNormCode").toString() : "";
-
-	            if (rawUsageType.equalsIgnoreCase(code)) {
-	                return StringUtils.hasText(normCode) ? normCode : code;
-	            }
-
-	            if (rawUsageType.equalsIgnoreCase(normCode)) {
-	                fallbackNormCode = normCode;
-	            }
+	        String resolvedCode = usageCodeResolver.resolveDemandNormCodeFromSelection(masterData,
+	                propertyType, usageCategory, propertyCategory);
+	        if (StringUtils.hasText(resolvedCode)) {
+	            return resolvedCode;
 	        }
-
-	        if (StringUtils.hasText(fallbackNormCode)) {
-	            return fallbackNormCode;
-	        }
-
-	    } catch (CustomException ce) {
-	        throw ce;
-	    } catch (Exception e) {
-	        log.error("Error while validating usage category against MDMS masterData", e);
-	        throw new CustomException("MDMS_VALIDATION_ERROR", "An error occurred while validating usage category against MDMS: " + e.getMessage());
+	    } catch (IllegalStateException exception) {
+	        throw new CustomException("INVALID_USAGE_TYPE_MAPPING", exception.getMessage());
 	    }
 
-	    throw new CustomException("INVALID_USAGE_TYPE", "The provided usageCategory/waterConnectionUsageType [" + rawUsageType + "] is invalid or inactive in MDMS master data.");
+	    throw new CustomException("INVALID_USAGE_TYPE_MAPPING", "Property type '" + propertyType
+	            + "' could not be mapped to an active WaterDemandNorms2 subCategoryCode. "
+	            + "Add demandNormCode/subCategoryCode to the active PropertyTax.PropertyType2 entry. "
+	            + "Legacy PropertyNewUsageType/PropertyType codes are intentionally not used for revised IFC norms.");
 	}
-	
+
 	/**
 	 * Validates Colony Category input format
 	 */
