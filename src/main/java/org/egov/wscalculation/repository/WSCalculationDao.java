@@ -14,6 +14,8 @@ public interface WSCalculationDao {
 	
 	List<MeterReading> searchMeterReadings(MeterReadingSearchCriteria criteria);
 	
+	List<MeterReading> searchMeterReadingHistory(String tenantId, String connectionNo);
+	
 	ArrayList<String> searchTenantIds();
 
 	ArrayList<String> searchConnectionNos(String connectionType, String tenantId);

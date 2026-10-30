@@ -1,6 +1,8 @@
 package org.egov.wscalculation.djbmonthlybilling;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
@@ -11,9 +13,11 @@ import org.egov.wscalculation.djbmonthlybilling.model.WaterBillingCycle;
 import org.egov.wscalculation.djbmonthlybilling.repository.WaterBillingCycleDao;
 import org.egov.wscalculation.djbmonthlybilling.service.DJBMonthlyBillingCalculationSnapshotService;
 import org.egov.wscalculation.djbmonthlybilling.service.DJBMonthlyBillingFetchService;
+import org.egov.wscalculation.djbmonthlybilling.service.DJBMonthlyBillingSystemContextService;
 import org.egov.wscalculation.djbmonthlybilling.web.model.DJBMonthlyBillingFetchRequest;
 import org.egov.wscalculation.djbmonthlybilling.web.model.DJBMonthlyBillingStatement;
 import org.egov.wscalculation.djbmonthlybilling.web.model.DJBMonthlyBillingStatementResponse;
+import org.egov.wscalculation.djbmonthlybilling.web.model.DJBMonthlyBillingSystemContext;
 import org.egov.wscalculation.repository.ServiceRequestRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -34,10 +38,14 @@ class DJBMonthlyBillingFetchServiceReconciliationTest {
 	@Mock
 	private ServiceRequestRepository serviceRequestRepository;
 
+	@Mock
+	private DJBMonthlyBillingSystemContextService systemContextService;
+
 	@Test
-	void shouldExposeNotGeneratedReconciliationWhenBillDoesNotExist() {
+	void shouldExposeNotGeneratedReconciliationWhenBillDoesNotExist() throws Exception {
 		DJBMonthlyBillingFetchService service = new DJBMonthlyBillingFetchService(billingCycleDao, snapshotService,
-				serviceRequestRepository, new ObjectMapper(), "http://billing-service", "/bill/v2/_search");
+				serviceRequestRepository, new ObjectMapper(), systemContextService, "http://billing-service",
+				"/bill/v2/_search");
 
 		WaterBillingCycle cycle = new WaterBillingCycle();
 		cycle.setId("CYCLE-001");
@@ -57,12 +65,30 @@ class DJBMonthlyBillingFetchServiceReconciliationTest {
 		request.setTenantId("dl.djb");
 		request.setConnectionNo(cycle.getConnectionno());
 		request.setRequestInfo(new RequestInfo());
+		DJBMonthlyBillingSystemContext context = DJBMonthlyBillingSystemContext.builder()
+				.djbRegister(DJBMonthlyBillingSystemContext.DjbRegisterDetails.builder()
+						.consumer(DJBMonthlyBillingSystemContext.ConsumerRegister.builder()
+							.name("Sample Consumer").address("Sample Address").phone("9999999999").build())
+						.classification(DJBMonthlyBillingSystemContext.TariffClassification.builder()
+							.djbCategoryCode("I").djbCategoryName("Domestic").build())
+						.build())
+				.build();
+		when(systemContextService.build(eq(request.getRequestInfo()), eq("dl.djb"),
+				eq(cycle.getConnectionno()), eq(cycle), eq(statement))).thenReturn(context);
 
 		DJBMonthlyBillingStatementResponse response = service.fetch(request);
 
 		assertEquals("NOT_GENERATED", response.getBillingStatement().getReconciliation().getStatus());
+		assertEquals("Sample Consumer", response.getBillingStatement().getConsumer().getName());
+		assertEquals("Sample Address", response.getBillingStatement().getConsumer().getAddress());
+		assertEquals("9999999999", response.getBillingStatement().getConsumer().getPhone());
+		assertEquals("I", response.getBillingStatement().getConsumer().getDjbCategoryCode());
+		assertEquals("Domestic", response.getBillingStatement().getConsumer().getDjbCategoryName());
 		assertEquals(new BigDecimal("230.73"),
 				response.getBillingStatement().getReconciliation().getCalculatedAmount());
+		String responseJson = new ObjectMapper().writeValueAsString(response);
+		assertFalse(responseJson.contains("\"systemData\""));
+		assertTrue(responseJson.contains("\"billingStatement\""));
 	}
 
 	private DJBMonthlyBillingStatement statementWithNetAmount(BigDecimal amount) {

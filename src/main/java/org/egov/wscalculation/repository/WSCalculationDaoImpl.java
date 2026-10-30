@@ -86,6 +86,12 @@ public class WSCalculationDaoImpl implements WSCalculationDao {
 	}
 	
 	@Override
+	public List<MeterReading> searchMeterReadingHistory(String tenantId, String connectionNo) {
+		String query = queryBuilder.getMeterReadingHistoryQuery();
+		return jdbcTemplate.query(query, new Object[] { tenantId, connectionNo }, meterReadingRowMapper);
+	}
+	
+	@Override
 	public List<MeterReading> searchCurrentMeterReadings(MeterReadingSearchCriteria criteria) {
 		List<Object> preparedStatement = new ArrayList<>();
 		String query = queryBuilder.getCurrentReadingConnectionQuery(criteria, preparedStatement);

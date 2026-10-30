@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.util.Collections;
 import java.util.List;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -32,12 +33,18 @@ public class DJBMonthlyBillingStatement {
 	@Builder
 	@NoArgsConstructor
 	@AllArgsConstructor
+	@JsonInclude(JsonInclude.Include.NON_NULL)
 	public static class Consumer {
 		private String tenantId;
 		private String connectionNo;
 		private String tariffCategory;
 		private String propertyUsage;
 		private BigDecimal propertyAreaSqm;
+		private String name;
+		private String address;
+		private String phone;
+		private String djbCategoryCode;
+		private String djbCategoryName;
 	}
 
 	@Data
@@ -66,6 +73,9 @@ public class DJBMonthlyBillingStatement {
 	public static class Reading {
 		private BigDecimal previousReading;
 		private Long previousReadingDate;
+
+		@JsonInclude(JsonInclude.Include.NON_NULL)
+		private PreviousOkReading previousOkReading;
 		private BigDecimal currentReading;
 		private Long currentReadingDate;
 		private BigDecimal previousConsumption;
@@ -76,6 +86,18 @@ public class DJBMonthlyBillingStatement {
 		private BigDecimal averageConsumption;
 		private BigDecimal deviationFactor;
 		private String unit;
+	}
+
+
+	@Data
+	@Builder
+	@NoArgsConstructor
+	@AllArgsConstructor
+	@JsonInclude(JsonInclude.Include.NON_NULL)
+	public static class PreviousOkReading {
+		private BigDecimal reading;
+		private Long readingDate;
+		private String readingQualityCode;
 	}
 
 	@Data
@@ -274,6 +296,7 @@ public class DJBMonthlyBillingStatement {
 		private BigDecimal calculatedAmount;
 		private BigDecimal difference;
 		private String reconciliationStatus;
+		private Long generatedAt;
 	}
 
 	@Data

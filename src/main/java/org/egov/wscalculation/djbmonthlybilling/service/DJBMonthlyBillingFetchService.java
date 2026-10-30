@@ -12,6 +12,10 @@ import org.egov.wscalculation.djbmonthlybilling.repository.WaterBillingCycleDao;
 import org.egov.wscalculation.djbmonthlybilling.web.model.DJBMonthlyBillingFetchRequest;
 import org.egov.wscalculation.djbmonthlybilling.web.model.DJBMonthlyBillingStatement;
 import org.egov.wscalculation.djbmonthlybilling.web.model.DJBMonthlyBillingStatementResponse;
+import org.egov.wscalculation.djbmonthlybilling.web.model.DJBMonthlyBillingSystemContext;
+import org.egov.wscalculation.djbmonthlybilling.web.model.DJBMonthlyBillingSystemContext.ConsumerRegister;
+import org.egov.wscalculation.djbmonthlybilling.web.model.DJBMonthlyBillingSystemContext.DjbRegisterDetails;
+import org.egov.wscalculation.djbmonthlybilling.web.model.DJBMonthlyBillingSystemContext.TariffClassification;
 import org.egov.wscalculation.repository.ServiceRequestRepository;
 import org.egov.wscalculation.web.models.RequestInfoWrapper;
 import org.springframework.beans.factory.annotation.Value;
@@ -30,18 +34,21 @@ public class DJBMonthlyBillingFetchService {
 	private final DJBMonthlyBillingCalculationSnapshotService snapshotService;
 	private final ServiceRequestRepository serviceRequestRepository;
 	private final ObjectMapper objectMapper;
+	private final DJBMonthlyBillingSystemContextService systemContextService;
 	private final String billingServiceHost;
 	private final String billSearchEndpoint;
 
 	public DJBMonthlyBillingFetchService(WaterBillingCycleDao billingCycleDao,
 			DJBMonthlyBillingCalculationSnapshotService snapshotService,
 			ServiceRequestRepository serviceRequestRepository, ObjectMapper objectMapper,
+			DJBMonthlyBillingSystemContextService systemContextService,
 			@Value("${egov.billingservice.host}") String billingServiceHost,
 			@Value("${egov.bill.search.endpoint}") String billSearchEndpoint) {
 		this.billingCycleDao = billingCycleDao;
 		this.snapshotService = snapshotService;
 		this.serviceRequestRepository = serviceRequestRepository;
 		this.objectMapper = objectMapper;
+		this.systemContextService = systemContextService;
 		this.billingServiceHost = billingServiceHost;
 		this.billSearchEndpoint = billSearchEndpoint;
 	}
@@ -85,7 +92,50 @@ public class DJBMonthlyBillingFetchService {
 
 		refreshCurrentCycleState(cycle, statement);
 		mergeBillDetails(requestInfo, tenantId, cycle, statement);
+		DJBMonthlyBillingSystemContext systemContext = systemContextService.build(requestInfo, tenantId,
+				connectionNo, cycle, statement);
+		mergeConsumerContext(statement, systemContext);
 		return DJBMonthlyBillingStatementResponse.builder().billingStatement(statement).build();
+	}
+
+	/**
+	 * Adds useful consumer/classification fields to the existing consumer object.
+	 * Reading details are enriched directly by the context service into
+	 * billingStatement.reading, so no duplicate top-level context is returned.
+	 */
+	private void mergeConsumerContext(DJBMonthlyBillingStatement statement,
+			DJBMonthlyBillingSystemContext context) {
+		if (statement == null || context == null || context.getDjbRegister() == null) {
+			return;
+		}
+		if (statement.getConsumer() == null) {
+			statement.setConsumer(DJBMonthlyBillingStatement.Consumer.builder().build());
+		}
+		DJBMonthlyBillingStatement.Consumer target = statement.getConsumer();
+		DjbRegisterDetails register = context.getDjbRegister();
+		ConsumerRegister source = register.getConsumer();
+		if (source != null) {
+			if (!StringUtils.hasText(target.getName()) && StringUtils.hasText(source.getName())) {
+				target.setName(source.getName());
+			}
+			if (!StringUtils.hasText(target.getAddress()) && StringUtils.hasText(source.getAddress())) {
+				target.setAddress(source.getAddress());
+			}
+			if (!StringUtils.hasText(target.getPhone()) && StringUtils.hasText(source.getPhone())) {
+				target.setPhone(source.getPhone());
+			}
+		}
+		TariffClassification classification = register.getClassification();
+		if (classification != null) {
+			if (!StringUtils.hasText(target.getDjbCategoryCode())
+					&& StringUtils.hasText(classification.getDjbCategoryCode())) {
+				target.setDjbCategoryCode(classification.getDjbCategoryCode());
+			}
+			if (!StringUtils.hasText(target.getDjbCategoryName())
+					&& StringUtils.hasText(classification.getDjbCategoryName())) {
+				target.setDjbCategoryName(classification.getDjbCategoryName());
+			}
+		}
 	}
 
 	private void refreshCurrentCycleState(WaterBillingCycle cycle, DJBMonthlyBillingStatement statement) {
@@ -155,6 +205,8 @@ public class DJBMonthlyBillingFetchService {
 		}
 		statement.getBill().setNumber(asString(getIgnoreCase(matchedBill, "billNumber")));
 		statement.getBill().setStatus(asString(getIgnoreCase(matchedBill, "status")));
+		Long generatedAt = resolveBillGeneratedAt(matchedBill);
+		statement.getBill().setGeneratedAt(generatedAt);
 
 		BigDecimal actualAmount = extractCycleBillAmount(matchedBill, cycle.getId(), cycleDetail);
 		statement.getBill().setAmount(actualAmount);
@@ -253,6 +305,23 @@ public class DJBMonthlyBillingFetchService {
 		return null;
 	}
 
+	private Long resolveBillGeneratedAt(Map<String, Object> bill) {
+		Long generatedAt = toLong(getIgnoreCase(bill, "createdDate"));
+		if (generatedAt == null) {
+			generatedAt = toLong(getIgnoreCase(bill, "createdTime"));
+		}
+		if (generatedAt == null) {
+			Map<String, Object> auditDetails = asMap(getIgnoreCase(bill, "auditDetails"));
+			if (auditDetails != null) {
+				generatedAt = toLong(getIgnoreCase(auditDetails, "createdTime"));
+				if (generatedAt == null) {
+					generatedAt = toLong(getIgnoreCase(auditDetails, "createdDate"));
+				}
+			}
+		}
+		return generatedAt;
+	}
+
 	private BigDecimal extractCycleBillAmount(Map<String, Object> bill, String billingCycleId,
 			Map<String, Object> cycleDetail) {
 		if (cycleDetail != null) {
@@ -338,6 +407,20 @@ public class DJBMonthlyBillingFetchService {
 		}
 		try {
 			return new BigDecimal(String.valueOf(value));
+		} catch (NumberFormatException ex) {
+			return null;
+		}
+	}
+
+ 	private Long toLong(Object value) {
+		if (value == null) {
+			return null;
+		}
+		if (value instanceof Number) {
+			return ((Number) value).longValue();
+		}
+		try {
+			return Long.valueOf(String.valueOf(value));
 		} catch (NumberFormatException ex) {
 			return null;
 		}

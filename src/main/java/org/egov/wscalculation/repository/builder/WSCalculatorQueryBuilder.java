@@ -122,10 +122,14 @@ public class WSCalculatorQueryBuilder {
 		return countQuery;
 	}
 	
+
+	public String getMeterReadingHistoryQuery() {
+		return Query + " WHERE mr.tenantid = ? AND mr.connectionNo = ? "
+				+ " ORDER BY mr.currentReadingDate DESC, mr.createdTime DESC";
+	}
+
 	/**
-	 * 
-	 * @param criteria
-	 *            would be meter reading criteria
+	 * @param criteria would be meter reading criteria
 	 * @param preparedStatement Prepared SQL Statement
 	 * @return Query for given criteria
 	 */
