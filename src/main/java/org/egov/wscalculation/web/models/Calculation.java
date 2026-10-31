@@ -64,4 +64,7 @@ public class Calculation {
 	
 	@JsonProperty("calculationDetail")
     private CalculationDetail calculationDetail;
+
+	@JsonProperty("infrastructureChargeAdjustment")
+	private BigDecimal infrastructureChargeAdjustment;
 }

@@ -51,6 +51,11 @@ public class CalculationReq  {
 		@Builder.Default
         @JsonProperty("isReconnectionRequest")
         private Boolean isReconnectionRequest=Boolean.FALSE;
+
+        /** When true, reconcile an updated IFC as an incremental amount. */
+        @JsonProperty("isInfrastructureReassessment")
+        @Builder.Default
+        private Boolean isInfrastructureReassessment = Boolean.FALSE;
         @Valid
         @NotNull
         @JsonProperty("CalculationCriteria")

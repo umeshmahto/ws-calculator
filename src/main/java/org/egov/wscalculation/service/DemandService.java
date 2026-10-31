@@ -159,6 +159,13 @@ public class DemandService {
 						connectionNumbersFromDemands = demands.stream().map(Demand::getConsumerCode)
 								.collect(Collectors.toSet());
 					if (!connectionNumbersFromDemands.contains(isForConnectionNo ? calculation.getConnectionNo() : calculation.getApplicationNO())) {
+                        // An infrastructure reassessment must only append an adjustment to an existing
+                        // one-time-fee demand. Creating a fresh full demand here could double-charge
+                        // application fees and the original IFC if the old demand cannot be found.
+                        if (Boolean.TRUE.equals(request.getIsInfrastructureReassessment())) {
+                            throw new CustomException("WS_INFRA_REASSESSMENT_DEMAND_NOT_FOUND",
+                                    "The existing demand was not found. No additional infrastructure demand was created; please contact the administrator.");
+                        }
 						createCalculations.add(calculation);
 					} else
 						updateCalculations.add(calculation);
@@ -170,7 +177,20 @@ public class DemandService {
 			createdDemands = createDemand(request, createCalculations, masterMap, isForConnectionNo);
 
 		if (!CollectionUtils.isEmpty(updateCalculations))
-			createdDemands = updateDemandForCalculation(request.getRequestInfo(), updateCalculations, fromDate, toDate,isForConnectionNo, request.getIsDisconnectionRequest(),request.getIsReconnectionRequest());
+			createdDemands = updateDemandForCalculation(request.getRequestInfo(), updateCalculations, fromDate, toDate,
+                    isForConnectionNo, request.getIsDisconnectionRequest(), request.getIsReconnectionRequest(),
+                    Boolean.TRUE.equals(request.getIsInfrastructureReassessment()));
+
+        // Updating demand details does not automatically rebuild an already-existing bill.
+        // Re-fetch it so the citizen sees only the newly-added incremental IFC (and applicable
+        // positive tax/cess delta) while the previously paid demand details remain intact.
+        if (Boolean.TRUE.equals(request.getIsInfrastructureReassessment()) && !CollectionUtils.isEmpty(createdDemands)) {
+            boolean billRefreshRequested = fetchBill(createdDemands, request.getRequestInfo(), masterMap);
+            if (!billRefreshRequested) {
+                throw new CustomException("WS_INFRA_REASSESSMENT_BILL_REFRESH_FAILED",
+                        "Additional infrastructure demand was updated, but the bill could not be refreshed. Please retry before proceeding to payment.");
+            }
+        }
 		return createdDemands;
 	}
 	
@@ -325,7 +345,11 @@ public class DemandService {
 	 * @param isDisconnectionRequest
 	 * @return The list of new DemandDetails
 	 */
-	private List<DemandDetail> getUpdatedDemandDetails(Calculation calculation, List<DemandDetail> demandDetails, Boolean isDisconnectionRequest) {
+	private List<DemandDetail> getUpdatedDemandDetails(Calculation calculation, List<DemandDetail> demandDetails,
+                                                        Boolean isDisconnectionRequest, boolean infrastructureReassessment) {
+        if (infrastructureReassessment) {
+            return getInfrastructureReassessmentDemandDetails(calculation, demandDetails);
+        }
 
 		List<DemandDetail> newDemandDetails = new ArrayList<>();
 		Map<String, List<DemandDetail>> taxHeadToDemandDetail = new HashMap<>();
@@ -382,6 +406,86 @@ public class DemandService {
 		addRoundOffTaxHead(calculation.getTenantId(), combinedBillDetails);
 		return combinedBillDetails;
 	}
+
+    /**
+     * Infrastructure-only reconciliation path for a citizen resubmission.
+     * It deliberately preserves the original WS_INFRASTRUCTURE_CHARGE amount and
+     * appends only a positive delta under WS_ADDITIONAL_INFRASTRUCTURE_CHARGE.
+     * Normal application fees/other tax heads are not recalculated in this path.
+     */
+    private List<DemandDetail> getInfrastructureReassessmentDemandDetails(Calculation calculation,
+                                                                          List<DemandDetail> existingDetails) {
+        if (calculation.getTaxHeadEstimates() == null) {
+            throw new CustomException("WS_INFRA_REASSESSMENT_ESTIMATE_MISSING",
+                    "Infrastructure recalculation did not return tax-head estimates.");
+        }
+
+        BigDecimal currentIfc = sumDemandTaxHead(existingDetails, WSCalculationConstant.WS_INFRASTRUCTURE_CHARGE)
+                .add(sumDemandTaxHead(existingDetails, WSCalculationConstant.WS_ADDITIONAL_INFRASTRUCTURE_CHARGE));
+        BigDecimal revisedIfc = calculation.getTaxHeadEstimates().stream()
+                .filter(Objects::nonNull)
+                .filter(estimate -> WSCalculationConstant.WS_INFRASTRUCTURE_CHARGE
+                        .equalsIgnoreCase(estimate.getTaxHeadCode()))
+                .map(TaxHeadEstimate::getEstimateAmount)
+                .filter(Objects::nonNull)
+                .reduce(BigDecimal.ZERO, BigDecimal::add)
+                .setScale(2, java.math.RoundingMode.HALF_UP);
+
+        BigDecimal delta = revisedIfc.subtract(currentIfc).setScale(2, java.math.RoundingMode.HALF_UP);
+        List<DemandDetail> updatedDetails = existingDetails == null
+                ? new ArrayList<>() : new ArrayList<>(existingDetails);
+
+        if (delta.compareTo(BigDecimal.ZERO) > 0) {
+            updatedDetails.add(DemandDetail.builder()
+                    .taxHeadMasterCode(WSCalculationConstant.WS_ADDITIONAL_INFRASTRUCTURE_CHARGE)
+                    .taxAmount(delta)
+                    .tenantId(calculation.getTenantId())
+                    .collectionAmount(BigDecimal.ZERO)
+                    .build());
+        }
+
+        // If tax/cess is calculated on IFC, include only its positive incremental
+        // difference. Never create a negative demand automatically on this path.
+        BigDecimal revisedTaxAndCess = calculation.getTaxHeadEstimates().stream()
+                .filter(Objects::nonNull)
+                .filter(estimate -> WSCalculationConstant.WS_TAX_AND_CESS
+                        .equalsIgnoreCase(estimate.getTaxHeadCode()))
+                .map(TaxHeadEstimate::getEstimateAmount)
+                .filter(Objects::nonNull)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal currentTaxAndCess = sumDemandTaxHead(existingDetails, WSCalculationConstant.WS_TAX_AND_CESS);
+        BigDecimal taxAndCessDelta = revisedTaxAndCess.subtract(currentTaxAndCess)
+                .setScale(2, java.math.RoundingMode.HALF_UP);
+        if (taxAndCessDelta.compareTo(BigDecimal.ZERO) > 0) {
+            updatedDetails.add(DemandDetail.builder()
+                    .taxHeadMasterCode(WSCalculationConstant.WS_TAX_AND_CESS)
+                    .taxAmount(taxAndCessDelta)
+                    .tenantId(calculation.getTenantId())
+                    .collectionAmount(BigDecimal.ZERO)
+                    .build());
+        }
+
+        // Expose the delta for response/logging consumers; the demand-detail adjustment
+        // remains the billing source of truth.
+        calculation.setInfrastructureChargeAdjustment(delta.max(BigDecimal.ZERO));
+        addRoundOffTaxHead(calculation.getTenantId(), updatedDetails);
+        log.info("[WS-IFC] Demand reconciliation: tenantId={}, applicationNo={}, currentIfc={}, revisedIfc={}, positiveDelta={}, taxAndCessDelta={}",
+                calculation.getTenantId(), calculation.getApplicationNO(), currentIfc, revisedIfc,
+                delta.max(BigDecimal.ZERO), taxAndCessDelta.max(BigDecimal.ZERO));
+        return updatedDetails;
+    }
+
+    private BigDecimal sumDemandTaxHead(List<DemandDetail> details, String taxHeadCode) {
+        if (details == null || taxHeadCode == null) {
+            return BigDecimal.ZERO;
+        }
+        return details.stream()
+                .filter(Objects::nonNull)
+                .filter(detail -> taxHeadCode.equalsIgnoreCase(detail.getTaxHeadMasterCode()))
+                .map(DemandDetail::getTaxAmount)
+                .filter(Objects::nonNull)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
 
 	/**
 	 * Adds roundOff taxHead if decimal values exists
@@ -681,7 +785,8 @@ public class DemandService {
 	 * @return Demands that are updated
 	 */
 	private List<Demand> updateDemandForCalculation(RequestInfo requestInfo, List<Calculation> calculations,
-			Long fromDate, Long toDate, boolean isForConnectionNo, Boolean isDisconnectionRequest,Boolean isReconnectionRequest) {
+			Long fromDate, Long toDate, boolean isForConnectionNo, Boolean isDisconnectionRequest,
+            Boolean isReconnectionRequest, boolean infrastructureReassessment) {
 		List<Demand> demands = new LinkedList<>();
 		Long fromDateSearch = isForConnectionNo ? fromDate : null;
 		Long toDateSearch = isForConnectionNo ? toDate : null;
@@ -702,9 +807,28 @@ public class DemandService {
 			if (CollectionUtils.isEmpty(searchResult))
 				throw new CustomException("EG_WS_INVALID_DEMAND_UPDATE", "No demand exists for Number: "
 						+ consumerCodes.toString());
+            if (infrastructureReassessment && searchResult.size() != 1) {
+                throw new CustomException("WS_INFRA_REASSESSMENT_MULTIPLE_DEMANDS",
+                        "More than one active demand exists for this application. Please reconcile the duplicate demands before changing infrastructure charges.");
+            }
 			Demand demand = searchResult.get(0);
 			String tenantId = calculation.getTenantId();
-			demand.setDemandDetails(getUpdatedDemandDetails(calculation, demand.getDemandDetails(), isDisconnectionRequest));
+            int existingDetailCount = demand.getDemandDetails() == null ? 0 : demand.getDemandDetails().size();
+            List<DemandDetail> updatedDetails = getUpdatedDemandDetails(calculation, demand.getDemandDetails(),
+                    isDisconnectionRequest, infrastructureReassessment);
+            if (infrastructureReassessment && updatedDetails.size() > existingDetailCount) {
+                BigDecimal incrementalAmount = updatedDetails.subList(existingDetailCount, updatedDetails.size()).stream()
+                        .filter(Objects::nonNull)
+                        .map(DemandDetail::getTaxAmount)
+                        .filter(Objects::nonNull)
+                        .reduce(BigDecimal.ZERO, BigDecimal::add);
+                if (incrementalAmount.compareTo(BigDecimal.ZERO) > 0) {
+                    // In this workflow the initial one-time fee has already been paid. Set the
+                    // minimum payable to the incremental due, not the original full assessment.
+                    demand.setMinimumAmountPayable(incrementalAmount.setScale(2, java.math.RoundingMode.HALF_UP));
+                }
+            }
+            demand.setDemandDetails(updatedDetails);
 
 			if(isForConnectionNo){
 				WaterConnection connection = calculation.getWaterConnection();

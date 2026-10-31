@@ -35,7 +35,10 @@ public class PropertyContextExtractor {
             builtUpArea = parseBigDecimal(details.get("coveredArea"));
         }
         if (builtUpArea.compareTo(BigDecimal.ZERO) == 0 && property.getSuperBuiltUpArea() != null) {
-            builtUpArea = BigDecimal.valueOf(property.getSuperBuiltUpArea().doubleValue());
+            builtUpArea = property.getSuperBuiltUpArea();
+        }
+        if (builtUpArea.compareTo(BigDecimal.ZERO) <= 0) {
+            builtUpArea = sumActiveUnitBuiltUpArea(property);
         }
 
         if (farArea.compareTo(BigDecimal.ZERO) == 0) {
@@ -130,6 +133,9 @@ public class PropertyContextExtractor {
         if (builtUpArea.compareTo(BigDecimal.ZERO) <= 0) {
             builtUpArea = firstPositive(details, "coveredArea", "covered_area");
         }
+        if (builtUpArea.compareTo(BigDecimal.ZERO) <= 0) {
+            builtUpArea = sumActiveUnitBuiltUpArea(property);
+        }
 
         BigDecimal carpetArea = firstPositive(details, "carpetArea", "carpet_area");
         BigDecimal plotArea = property != null && property.getLandArea() != null
@@ -178,6 +184,34 @@ public class PropertyContextExtractor {
         vars.put("sq_area", servantQuarterArea);
 
         return vars;
+    }
+
+    /**
+     * Some Property payloads keep construction areas only under units[].constructionDetail.
+     * Use those values only as a fallback, so explicitly captured aggregate area fields remain
+     * authoritative and unit areas are not double-counted.
+     */
+    private BigDecimal sumActiveUnitBuiltUpArea(Property property) {
+        if (property == null || property.getUnits() == null || property.getUnits().isEmpty()) {
+            return BigDecimal.ZERO;
+        }
+        BigDecimal total = BigDecimal.ZERO;
+        for (org.egov.wscalculation.web.models.Unit unit : property.getUnits()) {
+            if (unit == null || Boolean.FALSE.equals(unit.getActive()) || unit.getConstructionDetail() == null) {
+                continue;
+            }
+            BigDecimal area = unit.getConstructionDetail().getBuiltUpArea();
+            if (area == null || area.compareTo(BigDecimal.ZERO) <= 0) {
+                area = unit.getConstructionDetail().getSuperBuiltUpArea();
+            }
+            if (area == null || area.compareTo(BigDecimal.ZERO) <= 0) {
+                area = unit.getConstructionDetail().getCarpetArea();
+            }
+            if (area != null && area.compareTo(BigDecimal.ZERO) > 0) {
+                total = total.add(area);
+            }
+        }
+        return total;
     }
 
     private boolean hasAnyKey(Map<String, Object> details, String... keys) {
