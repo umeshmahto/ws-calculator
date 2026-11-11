@@ -77,14 +77,40 @@ public class PaymentNotificationService {
 			Map<String, Object> info = (Map<String, Object>) record.get("requestInfo");
 			RequestInfo requestInfo = mapper.convertValue(info, RequestInfo.class);
 
+			if (requestInfo == null) {
+				log.warn("Skipping bill notification: RequestInfo is missing");
+				return;
+			}
+
+			if (ONE_TIME_FEE_SERVICE_FIELD.equalsIgnoreCase(mappedRecord.get(serviceName))
+					|| (mappedRecord.get(consumerCode) != null
+					&& mappedRecord.get(consumerCode).startsWith("WS_AP/"))) {
+				log.info("Skipping connection-level bill notification for application {}",
+						mappedRecord.get(consumerCode));
+				return;
+			}
+
 			org.egov.common.contract.request.User userInfoCopy = requestInfo.getUserInfo();
-			org.egov.common.contract.request.User userInfo = notificationUtil.getInternalMicroserviceUser(requestInfo.getUserInfo().getTenantId());
+			String userTenantId = userInfoCopy != null && StringUtils.hasText(userInfoCopy.getTenantId())
+					? userInfoCopy.getTenantId() : mappedRecord.get(tenantId);
+			if (StringUtils.hasText(userTenantId) && userTenantId.contains(".")) {
+				userTenantId = userTenantId.substring(0, userTenantId.indexOf('.'));
+			}
+			org.egov.common.contract.request.User userInfo =
+					notificationUtil.getInternalMicroserviceUser(userTenantId);
 			requestInfo.setUserInfo(userInfo);
 
 			List<WaterConnection> waterConnectionList = calculatorUtil.getWaterConnection(requestInfo,
 					mappedRecord.get(consumerCode), mappedRecord.get(tenantId));
-			int size = waterConnectionList.size();
-			WaterConnection waterConnection = waterConnectionList.get(size - 1);
+			if (CollectionUtils.isEmpty(waterConnectionList)) {
+				log.warn("No Water Connection found for connection number {}", mappedRecord.get(consumerCode));
+				return;
+			}
+			WaterConnection waterConnection = waterConnectionList.get(waterConnectionList.size() - 1);
+			if (waterConnection == null) {
+				log.warn("Water Connection search returned a null record for {}", mappedRecord.get(consumerCode));
+				return;
+			}
 			WaterConnectionRequest waterConnectionRequest = WaterConnectionRequest.builder()
 					.waterConnection(waterConnection).requestInfo(requestInfo).build();
 
@@ -368,21 +394,29 @@ public class PaymentNotificationService {
 	 * @return message after replacing placeholder with values
 	 *
 	 */
-	public String getBillNotificationMessage(String message,Map<String, Object> masterMap,User user) {
+	public String getBillNotificationMessage(String message, Map<String, Object> masterMap, User user) {
+		return getBillNotificationMessage(message, masterMap, user, user == null ? null : user.getTenantId());
+	}
+
+	private String getBillNotificationMessage(String message, Map<String, Object> masterMap,
+			User user, String serviceTenantId) {
 		if (message.contains("{Name}"))
-			message = message.replace("{Name}", user.getName());
+			message = message.replace("{Name}", user == null || user.getName() == null ? "" : user.getName());
 		if (message.contains("{Service}"))
 			message = message.replace("{Service}", WSCalculationConstant.SERVICE_FIELD_VALUE_WS);
-		if (message.contains("{ULB}"))
-			message = message.replace("{ULB}", capitalize(user.getTenantId().split("\\.")[1]));
-		if (message.contains("{billing cycle}"))
-		{
-			String billingCycle = calculatorUtil.getBillingCycle(masterMap);
-			message = message.replace("{billing cycle}",billingCycle);
+		if (message.contains("{ULB}")) {
+			String tenantForUlb = StringUtils.hasText(serviceTenantId) ? serviceTenantId
+					: (user == null ? null : user.getTenantId());
+			String[] tenantParts = StringUtils.hasText(tenantForUlb) ? tenantForUlb.split("\\.") : new String[0];
+			String ulb = tenantParts.length > 1 ? tenantParts[1]
+					: (tenantParts.length == 1 ? tenantParts[0] : "");
+			message = message.replace("{ULB}", capitalize(ulb));
 		}
-
+		if (message.contains("{billing cycle}")) {
+			String billingCycle = calculatorUtil.getBillingCycle(masterMap);
+			message = message.replace("{billing cycle}", billingCycle);
+		}
 		return message;
-
 	}
 
 
@@ -419,7 +453,7 @@ log.info("Sending Bill Notification");
 					return;
 				}
 
-				messageString = getBillNotificationMessage(messageString,masterMap,user);
+				messageString = getBillNotificationMessage(messageString, masterMap, user, tenantId);
 				log.info(messageString);
 				SMSRequest req = SMSRequest.builder().mobileNumber(user.getMobileNumber()).message(messageString).category(Category.NOTIFICATION).build();
 				List<SMSRequest> smsRequests = new ArrayList<>();
@@ -445,7 +479,7 @@ log.info("Sending Bill Notification");
 					log.info("EG_WS No message Found For " + WSCalculationConstant.BILL_SUCCESS_MESSAGE_EMAIL+" or "+BILL_FAILURE_MESSAGE_EMAIL );
 					return;
 				}
-				String customizedMsg = getBillNotificationMessage(messageString,masterMap,user);
+				String customizedMsg = getBillNotificationMessage(messageString, masterMap, user, tenantId);
 
 				String subject = customizedMsg.substring(customizedMsg.indexOf("<h2>")+4,customizedMsg.indexOf("</h2>"));
 				String body = customizedMsg.substring(customizedMsg.indexOf("</h2>")+5);

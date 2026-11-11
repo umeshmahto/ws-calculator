@@ -391,6 +391,7 @@ public class WSCalculationConstant {
 	public static final String WS_WATER_ADVANCE = "WS_WATER_ADVANCE";
 	public static final String WS_REOPENING_FEE = "WS_REOPENING_FEE";
 	public static final String WS_MUTATION_TRADE_SECURITY = "WS_MUTATION_TRADE_SECURITY";
+	public static final String WS_OCCUPY_SECURITY_CHARGE = "WS_OCCUPY_SECURITY_CHARGE";
 	public static final String MUTATION_BUSINESS_SERVICE = "WS.MUTATION";
 	public static final String MUTATION_WS_BUSINESS_SERVICE = "mutationWSConnection";
 	public static final String WS_MUTATION_PENALTY = "WS_MUTATION_PENALTY";
@@ -423,6 +424,7 @@ public class WSCalculationConstant {
 	public static final String MUTATION_FEE = "MUTATION_FEE";
 	public static final String REOPENING_FEE = "REOPENING_FEE";
 	public static final String MUTATION_TRADE_SECURITY = "MUTATION_TRADE_SECURITY";
+	public static final String OCCUPY_SECURITY_CHARGE = "OCCUPY_SECURITY_CHARGE";
 
 	// ------------------------------
 	// Infrastructure Charge Master
@@ -445,7 +447,7 @@ public class WSCalculationConstant {
 	public static final String WS_NEW_CONNECTION_FEE = "WS_NEW_CONNECTION_FEE";
 	public static final String WS_INFRASTRUCTURE_CHARGE = "WS_INFRASTRUCTURE_CHARGE";
 	public static final String WS_ADDITIONAL_INFRASTRUCTURE_CHARGE = "WS_ADDITIONAL_INFRASTRUCTURE_CHARGE";
-
+	
 	public static final String TEMPORARY_DISCONNECTION_FEE_CONST = "TEMPORARY_DISCONNECTION_FEE";
 	public static final String NON_PAYMENT_DISCONNECTION_FEE_CONST = "NON_PAYMENT_DISCONNECTION_FEE";
 	public static final String PERMANENT_DISCONNECTION_FEE_CONST = "PERMANENT_DISCONNECTION_FEE";

@@ -301,31 +301,37 @@ public class NotificationUtil {
 	 * @return - Returns User object with given UUID
 	 */
 	public User fetchUserByUUID(String uuidstring, RequestInfo requestInfo, String tenantId) {
-		log.info("here- "+uuidstring);
+		if (StringUtils.isBlank(uuidstring)) {
+			log.warn("Skipping bill notification user lookup because UUID is empty");
+			return null;
+		}
+		
+		String userTenantId = StringUtils.isBlank(tenantId) ? tenantId : StringUtils.substringBefore(tenantId, ".");
 		StringBuilder uri = new StringBuilder();
 		uri.append(config.getUserHost()).append(config.getUserSearchEndpoint());
 		Map<String, Object> userSearchRequest = new HashMap<>();
 		userSearchRequest.put("RequestInfo", requestInfo);
-		userSearchRequest.put("tenantId", tenantId);
-		userSearchRequest.put("userType", "EMPLOYEE");
-		Set<String> uuid = new HashSet<>() ;
-		uuid.add(uuidstring);
-		userSearchRequest.put("uuid", uuid);
-		log.info("user serach req - "+userSearchRequest.toString());
-		User user = null;
+		userSearchRequest.put("tenantId", userTenantId);
+		userSearchRequest.put("uuid", Collections.singletonList(uuidstring));
 		try {
 			LinkedHashMap<String, Object> responseMap = (LinkedHashMap<String, Object>) serviceRequestRepository.fetchResult(uri, userSearchRequest);
-			log.info("responseMap - "+ responseMap.toString());
-			List<LinkedHashMap<String, Object>> users = (List<LinkedHashMap<String, Object>>) responseMap.get("user");
-			String dobFormat = "yyyy-MM-dd";
-			parseResponse(responseMap,dobFormat);
-			user = 	mapper.convertValue(users.get(0), User.class);
+			if (responseMap == null) {
+				log.warn("User service returned an empty response for bill notification lookup");
+				return null;
+			}
 
-		}catch(Exception e) {
-			log.error("Exception while trying parse user object: ",e);
+			List<LinkedHashMap<String, Object>> users = (List<LinkedHashMap<String, Object>>) responseMap.get("user");
+			if (CollectionUtils.isEmpty(users)) {
+				log.warn("No user found for bill notification in tenant {}", userTenantId);
+				return null;
+			}
+
+			parseResponse(responseMap, "yyyy-MM-dd");
+			return mapper.convertValue(users.get(0), User.class);
+		} catch (Exception e) {
+			log.error("Unable to fetch bill notification user for tenant {}", userTenantId, e);
+			return null;
 		}
-		log.info(user.toString());
-		return user;
 	}
 
 	/**
@@ -337,7 +343,8 @@ public class NotificationUtil {
 		String formatForDate = "dd-MM-yyyy HH:mm:ss";
 		if(users!=null){
 			users.forEach( map -> {
-						map.put("createdDate",dateTolong((String)map.get("createdDate"),formatForDate));
+						if ((String) map.get("createdDate") != null)
+							map.put("createdDate", dateTolong((String) map.get("createdDate"), formatForDate));
 						if((String)map.get("lastModifiedDate")!=null)
 							map.put("lastModifiedDate",dateTolong((String)map.get("lastModifiedDate"),formatForDate));
 						if((String)map.get("dob")!=null)

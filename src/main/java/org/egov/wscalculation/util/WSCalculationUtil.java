@@ -19,9 +19,12 @@ import org.springframework.util.CollectionUtils;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import lombok.Getter;
+import lombok.extern.slf4j.Slf4j;
+import com.fasterxml.jackson.core.type.TypeReference;
 
 @Component
 @Getter
+@Slf4j
 public class WSCalculationUtil {
 
 	@Autowired
@@ -207,11 +210,114 @@ public class WSCalculationUtil {
 					"Water connection cannot be enriched without property");
 		}
 		Property property = propertyList.get();
+		if (isNewConnectionResubmission(waterConnectionRequest.getWaterConnection())) {
+			logPropertyCalculationContext(property);
+			validateApplicationPropertyContext(waterConnectionRequest.getWaterConnection(), property);
+		}
 		if (StringUtils.isEmpty(property.getUsageCategory())) {
 			throw new CustomException("INVALID_WATER_CONNECTION_PROPERTY_USAGE_TYPE",
 					"Water connection cannot be enriched without property usage type");
 		}
 		return property;
+	}
+
+	/** Logs the latest authoritative property values used by water calculations. */
+	private void logPropertyCalculationContext(Property property) {
+		Map<String, Object> details = new HashMap<>();
+		if (property.getAdditionalDetails() != null) {
+			try {
+				details = objectMapper.convertValue(property.getAdditionalDetails(),
+						new TypeReference<Map<String, Object>>() { });
+			} catch (IllegalArgumentException ex) {
+				log.warn("[WS-PROPERTY-CONTEXT] Could not parse property additionalDetails. propertyId={}", property.getPropertyId());
+			}
+		}
+		log.info("[WS-PROPERTY-CONTEXT] propertyId={}, tenantId={}, landArea={}, superBuiltUpArea={}, builtUpArea={}, plotArea={}, propertyLastModifiedTime={}",
+				property.getPropertyId(), property.getTenantId(), property.getLandArea(),
+				property.getSuperBuiltUpArea(), details.get("builtUpArea"), details.get("plotArea"),
+				property.getAuditDetails() == null ? null : property.getAuditDetails().getLastModifiedTime());
+	}
+
+	private boolean isNewConnectionResubmission(WaterConnection connection) {
+		return connection != null
+				&& WSCalculationConstant.NEW_WATER_CONNECTION.equalsIgnoreCase(connection.getApplicationType())
+				&& connection.getProcessInstance() != null
+				&& "RESUBMIT_APPLICATION".equalsIgnoreCase(connection.getProcessInstance().getAction());
+	}
+
+	/**
+	 * For a citizen resubmission, verify that the WS application area fields match
+	 * the latest Property Service record. The calculator always calculates from the
+	 * Property Service object; this check prevents a stale or client-forged WS copy
+	 * from silently disagreeing with the authoritative property.
+	 */
+	public void validateApplicationPropertyContext(WaterConnection connection, Property property) {
+		if (connection == null || property == null || connection.getAdditionalDetails() == null) {
+			return;
+		}
+		Map<String, Object> wsDetails = objectMapper.convertValue(connection.getAdditionalDetails(),
+				new TypeReference<Map<String, Object>>() { });
+		Map<String, Object> propertyDetails = new HashMap<>();
+		if (property.getAdditionalDetails() != null) {
+			propertyDetails = objectMapper.convertValue(property.getAdditionalDetails(),
+					new TypeReference<Map<String, Object>>() { });
+		}
+
+		Object canonicalPlotArea = property.getLandArea() != null
+				? property.getLandArea() : firstNonBlank(propertyDetails, "plotArea", "landArea");
+		assertPropertyAreaMatches("plotArea", wsDetails.get("plotArea"), canonicalPlotArea,
+				connection.getApplicationNo());
+
+		Object canonicalBuiltUpArea = firstNonBlank(propertyDetails, "builtUpArea", "built_up_area",
+				"totalBuiltUpArea", "totalBuiltupArea");
+		if (canonicalBuiltUpArea == null) {
+			canonicalBuiltUpArea = property.getSuperBuiltUpArea();
+		}
+		assertPropertyAreaMatches("builtUpArea", wsDetails.get("builtUpArea"), canonicalBuiltUpArea,
+				connection.getApplicationNo());
+
+		// Detect a Property update racing between the WS validation and calculator call.
+		Object snapshotObject = wsDetails.get("propertyCalculationSnapshot");
+		if (snapshotObject != null && property.getAuditDetails() != null
+				&& property.getAuditDetails().getLastModifiedTime() != null) {
+			Map<String, Object> snapshot = objectMapper.convertValue(snapshotObject,
+					new TypeReference<Map<String, Object>>() { });
+			Object snapshotTime = snapshot.get("propertyLastModifiedTime");
+			if (snapshotTime != null && !snapshotTime.toString().equals(
+						property.getAuditDetails().getLastModifiedTime().toString())) {
+				throw new CustomException("WS_PROPERTY_VERSION_CHANGED",
+						"Property details changed while the water application was being recalculated. Refresh and resubmit the application.");
+			}
+		}
+	}
+
+	private Object firstNonBlank(Map<String, Object> details, String... keys) {
+		for (String key : keys) {
+			Object value = details.get(key);
+			if (value != null && !value.toString().trim().isEmpty()) {
+				return value;
+			}
+		}
+		return null;
+	}
+
+	private void assertPropertyAreaMatches(String field, Object wsValue, Object propertyValue,
+			String applicationNo) {
+		if (wsValue == null || wsValue.toString().trim().isEmpty()
+				|| propertyValue == null || propertyValue.toString().trim().isEmpty()) {
+			return;
+		}
+		try {
+			BigDecimal wsArea = new BigDecimal(wsValue.toString().trim());
+			BigDecimal propertyArea = new BigDecimal(propertyValue.toString().trim());
+			if (wsArea.compareTo(propertyArea) != 0) {
+				throw new CustomException("WS_PROPERTY_AREA_NOT_SYNCED",
+						"The " + field + " in the water application does not match the latest Property record. Refresh property details before calculation.");
+			}
+		} catch (NumberFormatException ex) {
+			throw new CustomException("WS_PROPERTY_AREA_INVALID",
+					"Invalid " + field + " value for water application " + applicationNo + ".");
+		}
 	}
 
 	/**
