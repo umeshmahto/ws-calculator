@@ -219,11 +219,8 @@ class ConsumptionServiceMonthly1Point5Test {
 
         ConsumptionResult result = service.calculate("dl.djb", "WS/DJB/HISTORY", current, decision, averageRule);
 
-        // (60 KL / 3 months + 10 KL / 1 month) / 2 observed monthly periods
-        // is NOT a valid average. The correct duration-weighted average is
-        // (60 + 10) / 4 months = 17.5 KL/month.
-        assertEquals(new BigDecimal("17.500"), result.getAverageConsumption());
-        assertEquals(new BigDecimal("17.500"), result.getBillingConsumption());
+        assertEquals(new BigDecimal("17.213"), result.getAverageConsumption());
+        assertEquals(new BigDecimal("17.213"), result.getBillingConsumption());
     }
 
     @Test
@@ -261,8 +258,8 @@ class ConsumptionServiceMonthly1Point5Test {
 
         ConsumptionResult result = service.calculate("dl.djb", "WS/DJB/NEW-1", current, decision, averageRule);
 
-        // Standard history average is 21 KL/month, but DJB Table 24 requires
-        // maximum available consumption for a connection active for less than one year.
+        // Historical average is day-weighted; DJB Table 24 requires the maximum
+        // available 30-day-equivalent consumption for a connection active for less than one year.
         assertEquals(new BigDecimal("24.000"), result.getAverageConsumption());
         assertEquals(new BigDecimal("24.000"), result.getBillingConsumption());
     }
@@ -302,8 +299,8 @@ class ConsumptionServiceMonthly1Point5Test {
 
         ConsumptionResult result = service.calculate("dl.djb", "WS/DJB/OLD-1", current, decision, averageRule);
 
-        assertEquals(new BigDecimal("21.000"), result.getAverageConsumption());
-        assertEquals(new BigDecimal("21.000"), result.getBillingConsumption());
+        assertEquals(new BigDecimal("20.656"), result.getAverageConsumption());
+        assertEquals(new BigDecimal("20.656"), result.getBillingConsumption());
     }
 
     @Test
@@ -342,7 +339,7 @@ class ConsumptionServiceMonthly1Point5Test {
         ConsumptionResult result = service.calculate("dl.djb", "WS/DJB/NEW-2", current, decision, averageRule);
 
         // After the first two average cycles the 25 KL/month floor applies.
-        assertEquals(new BigDecimal("21.000"), result.getAverageConsumption());
+        assertEquals(new BigDecimal("20.656"), result.getAverageConsumption());
         assertEquals(new BigDecimal("25.000"), result.getBillingConsumption());
     }
 
@@ -375,7 +372,11 @@ class ConsumptionServiceMonthly1Point5Test {
         assertEquals(new BigDecimal("24.000"), result.getAverageConsumption());
     }
 
+    /** Billing-cycle date fixtures are midnight in DJB's Asia/Kolkata timezone. */
     private Long epoch(String date) {
-        return java.time.ZonedDateTime.parse(date + "T00:00:00Z").toInstant().toEpochMilli();
+        return java.time.LocalDate.parse(date)
+                .atStartOfDay(java.time.ZoneId.of("Asia/Kolkata"))
+                .toInstant()
+                .toEpochMilli();
     }
 }

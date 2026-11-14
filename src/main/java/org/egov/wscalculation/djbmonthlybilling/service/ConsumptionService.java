@@ -6,7 +6,6 @@ import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
-import java.time.ZoneOffset;
 import java.util.List;
 
 import org.egov.wscalculation.djbmonthlybilling.model.WaterBillingCycle;
@@ -130,8 +129,8 @@ public class ConsumptionService {
 		if (periodTo == null || lookbackMonths == null || lookbackMonths <= 0) {
 			return null;
 		}
-		return Instant.ofEpochMilli(periodTo).atZone(ZoneOffset.UTC).toLocalDate()
-				.minusMonths(lookbackMonths).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli();
+		return Instant.ofEpochMilli(periodTo).atZone(DJB_ZONE).toLocalDate()
+				.minusMonths(lookbackMonths).atStartOfDay(DJB_ZONE).toInstant().toEpochMilli();
 	}
 
 	private BigDecimal calculateHistoricalAverage(List<WaterBillingCycle> cycles, Integer lookbackMonths,
@@ -141,13 +140,14 @@ public class ConsumptionService {
 			return null;
 		}
 
-		BigDecimal targetMonths = BigDecimal.valueOf(lookbackMonths);
-		BigDecimal remainingMonths = targetMonths;
+		// Weight monthly-equivalent consumption by the actual overlapping days.
+		// This keeps the lookback window exact (e.g. the previous 12 IST calendar
+		// months) and avoids treating a 41-day cycle as one full billing month.
 		BigDecimal weightedMonthlyConsumption = BigDecimal.ZERO;
-		BigDecimal observedMonths = BigDecimal.ZERO;
+		BigDecimal observedDays = BigDecimal.ZERO;
 
 		for (WaterBillingCycle cycle : cycles) {
-			if (remainingMonths.signum() <= 0 || cycle == null || cycle.getBillingconsumption() == null
+			if (cycle == null || cycle.getBillingconsumption() == null
 					|| cycle.getBillingconsumption().signum() < 0 || cycle.getBillingperiodto() == null) {
 				continue;
 			}
@@ -160,39 +160,33 @@ public class ConsumptionService {
 
 			// Only the portion of a historical cycle that falls inside the DJB
 			// 12-month window is eligible for the average. The monthly-equivalent
-			// consumption is weighted by the clipped overlap, preventing an older
-			// multi-month cycle from leaking outside the configured lookback period.
+			// consumption is weighted by the exact clipped overlap in days.
 			long overlapFrom = Math.max(normalizationFrom, lookbackStart);
 			long overlapTo = Math.min(cycle.getBillingperiodto(), periodTo);
 			if (overlapTo <= overlapFrom) {
 				continue;
 			}
 
-			long cycleMonths = DJBConsumptionPeriodUtil.calculateBillingMonths(normalizationFrom, cycle.getBillingperiodto());
-			long overlapMonths = DJBConsumptionPeriodUtil.calculateBillingMonths(overlapFrom, overlapTo);
-			if (cycleMonths <= 0 || overlapMonths <= 0) {
+			BigDecimal cycleDays = DJBConsumptionPeriodUtil.calculateElapsedDays(
+					normalizationFrom, cycle.getBillingperiodto());
+			BigDecimal overlapDays = DJBConsumptionPeriodUtil.calculateElapsedDays(overlapFrom, overlapTo);
+			if (cycleDays == null || overlapDays == null || cycleDays.signum() <= 0 || overlapDays.signum() <= 0) {
 				continue;
 			}
 
-			BigDecimal cycleMonthlyConsumption = DJBConsumptionPeriodUtil.toBillingMonthConsumption(
-					cycle.getBillingconsumption(), normalizationFrom, cycle.getBillingperiodto());
-			if (cycleMonthlyConsumption == null) {
-				continue;
-			}
-
-			BigDecimal includedMonths = BigDecimal.valueOf(Math.min(cycleMonths, overlapMonths))
-					.min(remainingMonths);
+			BigDecimal cycleMonthlyConsumption = cycle.getBillingconsumption()
+					.multiply(BigDecimal.valueOf(30L), MC)
+					.divide(cycleDays, 18, RoundingMode.HALF_UP);
 			weightedMonthlyConsumption = weightedMonthlyConsumption
-					.add(cycleMonthlyConsumption.multiply(includedMonths, MC), MC);
-			observedMonths = observedMonths.add(includedMonths, MC);
-			remainingMonths = remainingMonths.subtract(includedMonths, MC);
+					.add(cycleMonthlyConsumption.multiply(overlapDays, MC), MC);
+			observedDays = observedDays.add(overlapDays, MC);
 		}
 
-		if (observedMonths.signum() <= 0) {
+		if (observedDays.signum() <= 0) {
 			return null;
 		}
 
-		return weightedMonthlyConsumption.divide(observedMonths, 3, RoundingMode.HALF_UP);
+		return weightedMonthlyConsumption.divide(observedDays, 3, RoundingMode.HALF_UP);
 	}
 
 	private boolean isLessThanOneYearOld(Long activationDate, Long billingPeriodTo) {
@@ -233,7 +227,7 @@ public class ConsumptionService {
 				normalizationFrom = activationDate;
 			}
 
-			BigDecimal cycleMonthlyConsumption = DJBConsumptionPeriodUtil.toBillingMonthConsumption(
+			BigDecimal cycleMonthlyConsumption = DJBConsumptionPeriodUtil.toMonthlyConsumption(
 					cycle.getBillingconsumption(), normalizationFrom, cycle.getBillingperiodto());
 			if (cycleMonthlyConsumption == null) {
 				continue;

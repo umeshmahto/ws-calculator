@@ -40,8 +40,14 @@ public class RebateCalculationService {
 		List<RebateItem> items = new ArrayList<>();
 
 		addFreeWaterRebate(context, rebates, items);
-		addRwhRebate(context, rebates, items);
-		addDjbEmployeeRebate(context, rebates, items);
+
+		// The DJB 20 KL concession is a 100% rebate on its eligible bill amount.
+		// When that amount is the complete pre-rebate bill, the payable balance is
+		// already zero; applying another gross-bill rebate would double-credit it.
+		if (!hasFullyRebatedBill(context, items)) {
+			addRwhRebate(context, rebates, items);
+			addDjbEmployeeRebate(context, rebates, items);
+		}
 
 		BigDecimal total = BigDecimal.ZERO;
 
@@ -100,9 +106,7 @@ public class RebateCalculationService {
 						.filter(r -> isRwhRule(r.getCode())).filter(r -> r.getRate() != null)
 						.filter(r -> r.getMinPropertyAreaSqm() == null || context.getPropertyAreaSqm() != null
 								&& context.getPropertyAreaSqm().compareTo(r.getMinPropertyAreaSqm()) >= 0)
-						.filter(r -> !Boolean.TRUE.equals(r.getRequiresFunctionalRwh()) || context.isFunctionalRwh())
-						.filter(r -> !Boolean.TRUE.equals(r.getRequiresFunctionalWastewaterRecycling())
-								|| context.isFunctionalWastewaterRecycling())
+						.filter(r -> isFunctionalSystemEligible(r, context))
 						.collect(Collectors.toList());
 
 		if (candidates.isEmpty()) {
@@ -161,6 +165,30 @@ public class RebateCalculationService {
 		items.add(RebateItem.builder().code(rule.getCode()).name(rule.getName()).rate(rule.getRate())
 				.baseAmount(money(baseAmount)).rebateAmount(rebateAmount)
 				.explanation(rule.getRate() + "% DJB employee rebate applied on eligible domestic bill").build());
+	}
+
+	private boolean isFunctionalSystemEligible(DJBMonthlyRebate rule, RebateCalculationContext context) {
+		if (Boolean.TRUE.equals(rule.getRequiresEitherFunctionalRwhOrWastewaterRecycling())) {
+			return context.isFunctionalRwh() || context.isFunctionalWastewaterRecycling();
+		}
+		if (Boolean.TRUE.equals(rule.getRequiresFunctionalRwh()) && !context.isFunctionalRwh()) {
+			return false;
+		}
+		return !Boolean.TRUE.equals(rule.getRequiresFunctionalWastewaterRecycling())
+				|| context.isFunctionalWastewaterRecycling();
+	}
+
+	private boolean hasFullyRebatedBill(RebateCalculationContext context, List<RebateItem> items) {
+		if (context.getTotalBillBeforeRebate() == null || context.getTotalBillBeforeRebate().signum() <= 0) {
+			return false;
+		}
+		BigDecimal total = BigDecimal.ZERO;
+		for (RebateItem item : items) {
+			if (item != null && item.getRebateAmount() != null) {
+				total = total.add(item.getRebateAmount());
+			}
+		}
+		return total.compareTo(context.getTotalBillBeforeRebate()) >= 0;
 	}
 
 	private boolean isFreeWaterEligible(RebateCalculationContext context, DJBMonthlyRebate rule) {

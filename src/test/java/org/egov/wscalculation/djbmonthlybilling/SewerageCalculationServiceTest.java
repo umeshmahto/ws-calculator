@@ -277,6 +277,128 @@ class SewerageCalculationServiceTest {
         assertEquals(bd("50060.00"), result.getTotalSewerageCharge());
     }
 
+
+    @Test
+    void shouldProrateMonthlyAdditionalSewerageUsingFractionalThirtyDayFactor() {
+        SewerageCalculationContext context = SewerageCalculationContext.builder()
+                .waterVolumetricCharge(bd("100"))
+                .waterConnectionAvailable(true)
+                .sewerConnectionAvailable(true)
+                .additionalWaterSource(true)
+                .propertyUsage("HOTEL_GUEST_HOUSE")
+                .numberOfRooms(40)
+                .billingMonths(2)
+                .billingPeriodMonths(bd("2.7"))
+                .build();
+        DJBAdditionalSewerageCharge hotel = additionalFixed("HOTEL_0_50", "HOTEL_GUEST_HOUSE", 0, 50, 2000);
+        SewerageCalculationResult result = service.calculate(context, Arrays.asList(waterConnected), Arrays.asList(hotel));
+        assertEquals(bd("5400.00"), result.getAdditionalSewerageCharge());
+    }
+
+    @Test
+    void shouldChargeBanquetHallPerFunctionalSiteNotPerMonth() {
+        SewerageCalculationContext context = SewerageCalculationContext.builder()
+                .waterConnectionAvailable(true)
+                .sewerConnectionAvailable(true)
+                .additionalWaterSource(true)
+                .propertyUsage("BANQUET_HALL")
+                .billingMonths(2)
+                .billingPeriodMonths(bd("2.7"))
+                .functionalSiteCount(2)
+                .build();
+        DJBAdditionalSewerageCharge banquet = new DJBAdditionalSewerageCharge();
+        banquet.setCode("BANQUET_HALL");
+        banquet.setPropertyUsage("BANQUET_HALL");
+        banquet.setChargeType("FIXED_MONTHLY");
+        banquet.setAmount(bd("10000"));
+        banquet.setUnit("FUNCTIONAL_SITE");
+        banquet.setActive(true);
+        SewerageCalculationResult result = service.calculate(context, Arrays.asList(), Arrays.asList(banquet));
+        assertEquals(bd("20000.00"), result.getAdditionalSewerageCharge());
+    }
+
+    @Test
+    void shouldSelectHigherHospitalBandAtSharedBoundary() {
+        SewerageCalculationContext context = SewerageCalculationContext.builder()
+                .waterConnectionAvailable(true)
+                .sewerConnectionAvailable(true)
+                .additionalWaterSource(true)
+                .propertyUsage("HOSPITAL")
+                .numberOfBeds(25)
+                .build();
+        DJBAdditionalSewerageCharge first = new DJBAdditionalSewerageCharge();
+        first.setCode("HOSPITAL_0_25"); first.setPropertyUsage("HOSPITAL");
+        first.setFromBeds(0); first.setToBeds(25); first.setChargeType("FIXED_MONTHLY");
+        first.setAmount(bd("1500")); first.setActive(true);
+        DJBAdditionalSewerageCharge second = new DJBAdditionalSewerageCharge();
+        second.setCode("HOSPITAL_25_50"); second.setPropertyUsage("HOSPITAL");
+        second.setFromBeds(25); second.setToBeds(50); second.setChargeType("FIXED_MONTHLY");
+        second.setAmount(bd("2000")); second.setActive(true);
+        SewerageCalculationResult result = service.calculate(context, Arrays.asList(), Arrays.asList(first, second));
+        assertEquals(bd("2000.00"), result.getAdditionalSewerageCharge());
+    }
+
+
+    @Test
+    void shouldApplyDomesticNoWaterSewerageAbove200OnlyWhenAreaIsGreaterThan200() {
+        DJBMonthlySewerageRule above200 = regularRule(
+                "DOMESTIC_ABOVE_200", "DOMESTIC", "FIXED_MONTHLY", null, 200.0, null, 450);
+        above200.setMinBuiltUpAreaExclusive(true);
+
+        SewerageCalculationContext exactly200 = SewerageCalculationContext.builder()
+                .waterConnectionAvailable(false).sewerConnectionAvailable(true)
+                .consumerCategory("DOMESTIC").builtUpAreaSqm(bd("200")).build();
+        SewerageCalculationContext above200Context = SewerageCalculationContext.builder()
+                .waterConnectionAvailable(false).sewerConnectionAvailable(true)
+                .consumerCategory("DOMESTIC").builtUpAreaSqm(bd("200.01")).build();
+
+        SewerageCalculationResult atBoundary = service.calculate(exactly200,
+                Arrays.asList(domesticUpTo200, above200), Arrays.asList());
+        SewerageCalculationResult aboveBoundary = service.calculate(above200Context,
+                Arrays.asList(domesticUpTo200, above200), Arrays.asList());
+
+        assertEquals(bd("150.00"), atBoundary.getRegularSewerageCharge());
+        assertEquals(bd("450.00"), aboveBoundary.getRegularSewerageCharge());
+    }
+
+    @Test
+    void shouldSupportExplicitFixedPerSiteBanquetChargeType() {
+        SewerageCalculationContext context = SewerageCalculationContext.builder()
+                .waterConnectionAvailable(true).sewerConnectionAvailable(true)
+                .additionalWaterSource(true).propertyUsage("BANQUET_HALL")
+                .functionalSiteCount(2).billingPeriodMonths(bd("2.7")).build();
+        DJBAdditionalSewerageCharge banquet = new DJBAdditionalSewerageCharge();
+        banquet.setCode("BANQUET_HALL");
+        banquet.setPropertyUsage("BANQUET_HALL");
+        banquet.setChargeType("FIXED_PER_SITE");
+        banquet.setUnit("FUNCTIONAL_SITE");
+        banquet.setAmount(bd("10000"));
+        banquet.setActive(true);
+
+        SewerageCalculationResult result = service.calculate(context,
+                Arrays.asList(waterConnected), Arrays.asList(banquet));
+
+        assertEquals(bd("20000.00"), result.getAdditionalSewerageCharge());
+    }
+
+    @Test
+    void shouldRejectBanquetChargeWhenFunctionalSiteCountIsMissing() {
+        SewerageCalculationContext context = SewerageCalculationContext.builder()
+                .waterConnectionAvailable(true).sewerConnectionAvailable(true)
+                .additionalWaterSource(true).propertyUsage("BANQUET_HALL")
+                .billingPeriodMonths(bd("2.7")).build();
+        DJBAdditionalSewerageCharge banquet = new DJBAdditionalSewerageCharge();
+        banquet.setCode("BANQUET_HALL");
+        banquet.setPropertyUsage("BANQUET_HALL");
+        banquet.setChargeType("FIXED_PER_SITE");
+        banquet.setUnit("FUNCTIONAL_SITE");
+        banquet.setAmount(bd("10000"));
+        banquet.setActive(true);
+
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                () -> service.calculate(context, Arrays.asList(waterConnected), Arrays.asList(banquet)));
+    }
+
     private DJBMonthlySewerageRule regularRule(
             String code,
             String category,

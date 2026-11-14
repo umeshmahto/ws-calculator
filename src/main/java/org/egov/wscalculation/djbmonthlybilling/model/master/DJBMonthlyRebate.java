@@ -25,5 +25,6 @@ public class DJBMonthlyRebate {
     private Boolean bulkApplicable;
     private Boolean requiresFunctionalRwh;
     private Boolean requiresFunctionalWastewaterRecycling;
+    private Boolean requiresEitherFunctionalRwhOrWastewaterRecycling;
     private Boolean active;
 }

@@ -47,6 +47,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -198,16 +199,23 @@ public class DJBMonthlyDemandService {
 		List<DJBMonthlyWaterTariff> tariffs = masterProvider.getWaterTariffs(requestInfo, tenantId);
 
 		long billingMonths = resolveTariffBillingMonths(cycle);
-		TariffCalculationResult water = tariffCalculationService.calculate(
-				consumption, category, tariffs, billingMonths, cycle.getBillingperiodfrom(), cycle.getBillingperiodto());
+		Long tariffPeriodFrom = resolveTariffBillingPeriodStart(cycle);
+		BigDecimal billingPeriodMonths = resolveTariffBillingPeriodMonths(cycle, tariffPeriodFrom);
+		TariffCalculationResult water = tariffCalculationService.calculate(consumption, category, tariffs,
+				billingPeriodMonths, billingMonths, tariffPeriodFrom, cycle.getBillingperiodto());
 
 		SewerageCalculationContext sewerageContext = SewerageCalculationContext.builder()
 				.waterVolumetricCharge(water.getWaterVolumetricCharge())
 				.billingMonths(water.getBillingMonths() == null ? 1 : water.getBillingMonths().intValue())
+				.billingPeriodMonths(water.getBillingPeriodMonths())
+				.functionalSiteCount(readIntegerDetail(connection, property, "functionalSiteCount", "numberOfFunctionalSites", "noOfFunctionalSites"))
 				.waterConnectionAvailable(true)
-				.sewerConnectionAvailable(true).additionalWaterSource(isAdditionalWaterSource(connection))
+				.sewerConnectionAvailable(readOptionalBooleanDetail(connection, property, true,
+						"sewerConnectionAvailable", "isSewerConnectionAvailable", "sewerConnected",
+						"hasSewerConnection", "sewerageConnected"))
+				.additionalWaterSource(isAdditionalWaterSource(connection))
 				.consumerCategory(category).propertyUsage(property.getUsageCategory())
-				.builtUpAreaSqm(property.getSuperBuiltUpArea()).build();
+				.builtUpAreaSqm(resolveBuiltUpAreaSqm(property)).build();
 
 		List<DJBMonthlySewerageRule> sewerageRules = masterProvider.getSewerageRules(requestInfo, tenantId);
 
@@ -231,7 +239,7 @@ public class DJBMonthlyDemandService {
 				.bulkConnection(readBooleanDetail(connection, property, "bulkConnection", "isBulkConnection", "bulk"))
 				.dwellingUnitCount(readIntegerDetail(property, connection, "numberOfDwellingUnits",
 						"dwellingUnitCount", "noOfDwellingUnits", "totalDwellingUnits"))
-				.propertyAreaSqm(property.getSuperBuiltUpArea()).functionalRwh(
+				.propertyAreaSqm(property.getLandArea() == null ? null : BigDecimal.valueOf(property.getLandArea())).functionalRwh(
 						readBooleanDetail(connection, property, "functionalRwh", "isFunctionalRwh",
 								"rwhFunctional", "rainWaterHarvestingFunctional"))
 				.functionalWastewaterRecycling(readBooleanDetail(connection, property,
@@ -719,6 +727,34 @@ public class DJBMonthlyDemandService {
 		return Boolean.parseBoolean(String.valueOf(value));
 	}
 
+	/**
+	 * Reads an optional sewer-connection indicator from WaterConnection or Property
+	 * additionalDetails. The source payload currently does not expose a typed
+	 * sewer-connection field, so preserve the previous metered-water default when
+	 * the flag is absent. An explicit false must suppress percentage sewerage.
+	 */
+	private boolean readOptionalBooleanDetail(WaterConnection connection, Property property,
+			boolean defaultValue, String... keys) {
+		Object value = firstDetail(connection == null ? null : connection.getAdditionalDetails(),
+				property == null ? null : property.getAdditionalDetails(), keys);
+		if (value == null) {
+			return defaultValue;
+		}
+		if (value instanceof Boolean) {
+			return (Boolean) value;
+		}
+		String normalized = String.valueOf(value).trim();
+		if ("true".equalsIgnoreCase(normalized) || "yes".equalsIgnoreCase(normalized)
+				|| "1".equals(normalized)) {
+			return true;
+		}
+		if ("false".equalsIgnoreCase(normalized) || "no".equalsIgnoreCase(normalized)
+				|| "0".equals(normalized)) {
+			return false;
+		}
+		throw new IllegalArgumentException("Invalid boolean sewer-connection flag: " + normalized);
+	}
+
 	private Integer readIntegerDetail(Object primary, Object secondary, String... keys) {
 		Object value = firstDetail(primary == null ? null : getAdditionalDetails(primary),
 				secondary == null ? null : getAdditionalDetails(secondary), keys);
@@ -925,6 +961,102 @@ public class DJBMonthlyDemandService {
 			throw new IllegalStateException("Unable to determine billing months for DJB billing cycle " + cycle.getId());
 		}
 		return months;
+	}
+
+	private Long resolveTariffBillingPeriodStart(WaterBillingCycle cycle) {
+		if (cycle == null) {
+			return null;
+		}
+
+		boolean actualBasis = BillingBasis.ACTUAL.equals(cycle.getBillingbasis())
+				|| BillingBasis.CORRECTED_ACTUAL.equals(cycle.getBillingbasis());
+		if (actualBasis) {
+			// Corrected actual consumption can span multiple average/provisional
+			// cycles. Use the same previous-OK start as the actual consumption and
+			// the existing 1.5x monthly normalization.
+			return DJBConsumptionPeriodUtil.resolveNormalizationStart(
+					cycle.getPreviousokreadingdate(), cycle.getBillingperiodfrom());
+		}
+		return cycle.getBillingperiodfrom();
+	}
+
+	private BigDecimal resolveTariffBillingPeriodMonths(WaterBillingCycle cycle, Long tariffPeriodFrom) {
+		if (cycle == null) {
+			return BigDecimal.ONE;
+		}
+
+		boolean actualBasis = BillingBasis.ACTUAL.equals(cycle.getBillingbasis())
+				|| BillingBasis.CORRECTED_ACTUAL.equals(cycle.getBillingbasis());
+		if (!actualBasis) {
+			// Average/provisional billingConsumption is already monthly consumption.
+			return BigDecimal.ONE;
+		}
+
+		BigDecimal months = DJBConsumptionPeriodUtil.toDjbBillingPeriodMonths(
+				tariffPeriodFrom, cycle.getBillingperiodto());
+		if (months == null || months.signum() <= 0) {
+			throw new IllegalStateException("Unable to determine DJB 30-day billing-period factor for cycle "
+					+ cycle.getId());
+		}
+		return months;
+	}
+
+	/**
+	 * DJB no-water-connection sewerage bands are based on built-up area, not
+	 * plot/land area. Prefer the explicit Property Service additionalDetails
+	 * value; retain superBuiltUpArea only as a legacy fallback when the explicit
+	 * built-up area is unavailable.
+	 */
+	private BigDecimal resolveBuiltUpAreaSqm(Property property) {
+		if (property == null) {
+			return null;
+		}
+
+		Map<String, Object> details = property.getAdditionalDetails() == null
+				? Collections.<String, Object>emptyMap()
+				: objectMapper.convertValue(property.getAdditionalDetails(),
+						new TypeReference<Map<String, Object>>() { });
+
+		BigDecimal builtUpArea = firstPositiveArea(details, "builtUpArea", "built_up_area",
+				"totalBuiltUpArea", "totalBuiltupArea", "total_built_up_area");
+
+		if (builtUpArea == null) {
+			BigDecimal farArea = firstPositiveArea(details, "farArea", "far_area", "farBuiltUpArea");
+			BigDecimal nonFarArea = firstPositiveArea(details, "nonFarArea", "nonFARArea",
+					"nonFarBuiltUpArea", "non_far_area");
+			if (farArea != null && nonFarArea != null) {
+				builtUpArea = farArea.add(nonFarArea);
+			}
+		}
+
+		if (builtUpArea == null) {
+			builtUpArea = firstPositiveArea(details, "coveredArea", "covered_area");
+		}
+		if (builtUpArea == null) {
+			builtUpArea = property.getSuperBuiltUpArea();
+		}
+		return builtUpArea;
+	}
+
+	private BigDecimal firstPositiveArea(Map<String, Object> values, String... keys) {
+		if (values == null) {
+			return null;
+		}
+		for (String key : keys) {
+			Object raw = values.get(key);
+			if (raw == null) {
+				continue;
+			}
+			try {
+				BigDecimal value = raw instanceof BigDecimal ? (BigDecimal) raw : new BigDecimal(raw.toString());
+				if (value.signum() > 0) {
+					return value;
+				}
+			} catch (NumberFormatException ignored) {
+				// Try the next documented Property Service area field.
+			}
+		}
+		return null;
 	}
 
 	private String actorForDemand(RequestInfo requestInfo) {

@@ -87,22 +87,50 @@ public class CorrectionService {
 				currentOkCycle.getBillingperiodto());
 
 		List<WaterBillingCycle> eligibleCycles = new ArrayList<>();
+		boolean unsupportedInterveningCycle = false;
 
 		if (interveningCycles != null) {
 			for (WaterBillingCycle cycle : interveningCycles) {
 				if (cycle == null || cycle.getBillingbasis() == null) {
+					unsupportedInterveningCycle = true;
 					continue;
 				}
 
 				/*
-				 * DJB Table 25 allows automatic cancellation/rebilling only for the
-				 * explicitly listed meter remarks. A generic AVERAGE/PROVISIONAL cycle
-				 * outside that RQC scope must never be silently corrected.
+				 * Only estimated cycles are candidates for automatic correction.
+				 * A normal ACTUAL / CORRECTED_ACTUAL cycle is not an estimated bill
+				 * and must neither be cancelled nor block correction of eligible
+				 * intervening AVERAGE / PROVISIONAL cycles.
+				 *
+				 * For each estimated cycle, DJB Table 25 must explicitly allow the
+				 * RQC. If even one estimated cycle is outside that scope, do not
+				 * cancel only a subset: the new OK-to-OK consumption spans all
+				 * estimated cycles and partial cancellation can leave overlapping
+				 * active demand.
 				 */
+				if (!BillingBasis.AVERAGE.equals(cycle.getBillingbasis())
+						&& !BillingBasis.PROVISIONAL.equals(cycle.getBillingbasis())) {
+					continue;
+				}
+
 				if (isAutomaticCorrectionEligible(cycle)) {
 					eligibleCycles.add(cycle);
+				} else {
+					unsupportedInterveningCycle = true;
 				}
 			}
+		}
+
+		if (unsupportedInterveningCycle) {
+			return CorrectionPlan.builder().connectionNo(currentOkCycle.getConnectionno())
+					.previousOkBillingCycleId(previousOkCycle.getId())
+					.currentOkBillingCycleId(currentOkCycle.getId())
+					.previousOkReading(previousOkCycle.getCurrentreading())
+					.currentOkReading(currentOkCycle.getCurrentreading())
+					.cyclesToCorrect(new ArrayList<WaterBillingCycle>())
+					.correctionRequired(false)
+					.reason("Automatic correction blocked: at least one intervening estimated cycle is not eligible under DJB Table 25; manual/ZRO review required")
+					.build();
 		}
 
 		BigDecimal previousReading = previousOkCycle.getCurrentreading();
@@ -489,8 +517,14 @@ public class CorrectionService {
 
 		CorrectionPlan plan = buildCorrectionPlan(tenantId, currentOkCycle);
 
-		if (plan == null || !plan.isCorrectionRequired()) {
+		if (plan == null) {
 			return CorrectionPlanResult.builder().correctionRequired(false).build();
+		}
+		if (!plan.isCorrectionRequired()) {
+			boolean manualReview = plan.getReason() != null
+					&& plan.getReason().startsWith("Automatic correction blocked:");
+			return CorrectionPlanResult.builder().correctionRequired(false)
+					.manualReviewRequired(manualReview).reason(plan.getReason()).build();
 		}
 
 		plan.setPaidAdjustmentAmount(
@@ -520,6 +554,8 @@ public class CorrectionService {
 	@lombok.Data
 	public static class CorrectionPlanResult {
 		private boolean correctionRequired;
+		private boolean manualReviewRequired;
+		private String reason;
 		private CorrectionPlan plan;
 		private BillingCorrection correction;
 	}

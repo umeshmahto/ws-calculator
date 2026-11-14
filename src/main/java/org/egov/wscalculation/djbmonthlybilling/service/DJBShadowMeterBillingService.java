@@ -301,6 +301,23 @@ public class DJBShadowMeterBillingService {
 			correction = correctionService.processAutomaticCorrection(requestInfo, cycle.getTenantid(), cycle,
 					actor(requestInfo), System.currentTimeMillis());
 
+			if (correction != null && correction.isManualReviewRequired()) {
+				/*
+				 * Do not generate the OK-to-OK demand when DJB Table 25 does not
+				 * authorize automatic cancellation of every intervening estimated
+				 * cycle. The demand would span those cycles while their earlier
+				 * average/provisional demands remained active, risking double billing.
+				 * Retain the calculated cycle and expose the review state for operations.
+				 */
+				cycle.setCorrectionstatus(CorrectionStatus.MANUAL_REVIEW_REQUIRED);
+				cycle.setZroremarks(correction.getReason());
+				cycle.setStatus(BillingCycleStatus.CALCULATED);
+				cycle.setLastmodifiedby(actor(requestInfo));
+				cycle.setLastmodifiedtime(System.currentTimeMillis());
+				persistCycleUpdate(cycle);
+				return;
+			}
+
 			if (correction != null && correction.isCorrectionRequired()) {
 				cycle.setCorrectionstatus(CorrectionStatus.PENDING);
 				persistCycleUpdate(cycle);

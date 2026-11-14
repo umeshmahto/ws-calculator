@@ -16,6 +16,7 @@ public class TariffCalculationResult {
     private BigDecimal consumption;
     private BigDecimal monthlyConsumption;
     private Long billingMonths;
+    private BigDecimal billingPeriodMonths;
     private BigDecimal waterVolumetricCharge;
     private BigDecimal serviceCharge;
     private BigDecimal totalWaterCharge;

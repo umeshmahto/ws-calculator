@@ -228,6 +228,44 @@ class RebateCalculationServiceTest {
         assertEquals("RWH_WATER_RECYCLING_15", result.getRebateItems().get(0).getCode());
     }
 
+
+    @Test
+    void shouldApplyTenPercentRwhRebateWhenOnlyWastewaterRecyclingIsFunctionalAndRuleUsesEitherFlag() {
+        RebateCalculationContext context = RebateCalculationContext.builder()
+                .propertyAreaSqm(bd("150"))
+                .functionalRwh(false)
+                .functionalWastewaterRecycling(true)
+                .totalBillBeforeRebate(bd("1000"))
+                .build();
+        DJBMonthlyRebate rwh = rebate("RWH_10", "RWH or Recycling Rebate", 10, 100, false, false);
+        rwh.setRequiresEitherFunctionalRwhOrWastewaterRecycling(true);
+        RebateCalculationResult result = service.calculate(context, Arrays.asList(rwh));
+        assertEquals(bd("100.00"), result.getTotalRebate());
+    }
+
+    @Test
+    void shouldNotStackRwhOrEmployeeRebateAfterFullTwentyKlFreeWaterWriteoff() {
+        RebateCalculationContext context = RebateCalculationContext.builder()
+                .consumption(bd("20"))
+                .monthlyConsumption(bd("20"))
+                .billingBasis(BillingBasis.ACTUAL)
+                .readingQualityCode("OK")
+                .consumerType("INDIVIDUAL_RESIDENCE")
+                .propertyCategory("CAT_I")
+                .connectionType("DOMESTIC")
+                .propertyAreaSqm(bd("200"))
+                .functionalRwh(true)
+                .djbEmployeeEligible(true)
+                .eligibleConnectionCount(1)
+                .totalBillBeforeRebate(bd("1000"))
+                .freeWaterEligibleAmount(bd("1000"))
+                .build();
+        RebateCalculationResult result = service.calculate(context,
+                Arrays.asList(freeWaterRule(), rebate("RWH_10", "RWH", 10, 100, true, false), employeeRule()));
+        assertEquals(bd("1000.00"), result.getTotalRebate());
+        assertEquals(1, result.getRebateItems().size());
+    }
+
     private DJBMonthlyRebate freeWaterRule() {
         DJBMonthlyRebate rule = new DJBMonthlyRebate();
         rule.setCode("FREE_WATER_20KL");

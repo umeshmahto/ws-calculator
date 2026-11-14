@@ -13,6 +13,7 @@ public class DJBMonthlySewerageRule {
     private String chargeType;
     private BigDecimal percentage;
     private BigDecimal minBuiltUpAreaSqm;
+    private Boolean minBuiltUpAreaExclusive;
     private BigDecimal maxBuiltUpAreaSqm;
     private BigDecimal amount;
     private Boolean requiresWaterConnection;

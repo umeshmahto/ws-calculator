@@ -140,7 +140,8 @@ public class DJBMonthlyBillingCalculationSnapshotService {
 						.connectionNo(cycle.getConnectionno())
 						.tariffCategory(connection == null ? null : connection.getConnectionCategory())
 						.propertyUsage(property == null ? null : property.getUsageCategory())
-						.propertyAreaSqm(property == null ? null : property.getSuperBuiltUpArea()).build())
+						.propertyAreaSqm(property == null || property.getLandArea() == null ? null
+						: BigDecimal.valueOf(property.getLandArea())).build())
 				.billingCycle(DJBMonthlyBillingStatement.BillingCycle.builder().id(cycle.getId())
 						.periodFrom(cycle.getBillingperiodfrom()).periodTo(cycle.getBillingperiodto())
 						.meterReadingId(cycle.getMeterreadingid()).readingQualityCode(cycle.getReadingqualitycode())
@@ -308,7 +309,7 @@ public class DJBMonthlyBillingCalculationSnapshotService {
 			for (TariffSlabCharge slab : water.getSlabCharges()) {
 				slabs.add(DJBMonthlyBillingStatement.Slab.builder().from(slab.getFrom()).to(slab.getTo())
 						.units(slab.getUnits()).ratePerKl(slab.getRatePerKl()).charge(slab.getCharge())
-						.explanation(buildSlabExplanation(slab, water.getBillingMonths())).build());
+						.explanation(buildSlabExplanation(slab, water.getBillingPeriodMonths())).build());
 			}
 		}
 
@@ -351,7 +352,8 @@ public class DJBMonthlyBillingCalculationSnapshotService {
 				.consumer(DJBMonthlyBillingStatement.Consumer.builder().tenantId(cycle.getTenantid())
 						.connectionNo(cycle.getConnectionno()).tariffCategory(water.getCategory())
 						.propertyUsage(property == null ? null : property.getUsageCategory())
-						.propertyAreaSqm(property == null ? null : property.getSuperBuiltUpArea()).build())
+						.propertyAreaSqm(property == null || property.getLandArea() == null ? null
+						: BigDecimal.valueOf(property.getLandArea())).build())
 				.billingCycle(DJBMonthlyBillingStatement.BillingCycle.builder().id(cycle.getId())
 						.periodFrom(cycle.getBillingperiodfrom()).periodTo(cycle.getBillingperiodto())
 						.meterReadingId(cycle.getMeterreadingid()).readingQualityCode(cycle.getReadingqualitycode())
@@ -395,6 +397,7 @@ public class DJBMonthlyBillingCalculationSnapshotService {
 				.charges(DJBMonthlyBillingStatement.Charges.builder()
 						.water(DJBMonthlyBillingStatement.WaterCharges.builder().consumption(water.getConsumption())
 								.monthlyConsumption(water.getMonthlyConsumption()).billingMonths(water.getBillingMonths())
+								.billingPeriodMonths(water.getBillingPeriodMonths())
 								.unit("KL").tariffId(water.getTariffId()).category(water.getCategory())
 								.volumetricCharge(water.getWaterVolumetricCharge())
 								.serviceCharge(water.getServiceCharge()).totalWaterCharge(water.getTotalWaterCharge())
@@ -530,13 +533,11 @@ public class DJBMonthlyBillingCalculationSnapshotService {
 				: value.setScale(MONEY_SCALE, RoundingMode.HALF_UP);
 	}
 
-	private String buildSlabExplanation(TariffSlabCharge slab, Long billingMonths) {
-		long months = billingMonths == null || billingMonths <= 0 ? 1L : billingMonths;
-		if (months == 1L) {
-			return slab.getUnits() + " KL x Rs." + slab.getRatePerKl() + " = Rs." + slab.getCharge();
-		}
-		return slab.getUnits() + " KL/month x Rs." + slab.getRatePerKl() + " x " + months
-				+ " months = Rs." + slab.getCharge();
+	private String buildSlabExplanation(TariffSlabCharge slab, BigDecimal billingPeriodMonths) {
+		BigDecimal periodMonths = billingPeriodMonths == null || billingPeriodMonths.signum() <= 0
+				? BigDecimal.ONE : billingPeriodMonths.stripTrailingZeros();
+		return slab.getUnits() + " KL (period units) x Rs." + slab.getRatePerKl()
+				+ "/KL = Rs." + slab.getCharge() + " [30-day period factor: " + periodMonths.toPlainString() + "]";
 	}
 
 	private String buildOnePointFiveReason(WaterBillingCycle cycle, BigDecimal threshold, boolean zroRequired) {

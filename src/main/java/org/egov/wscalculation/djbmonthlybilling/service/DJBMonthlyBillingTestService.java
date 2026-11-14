@@ -49,8 +49,29 @@ public class DJBMonthlyBillingTestService {
 
 		List<DJBMonthlyWaterTariff> tariffs = masterProvider.getWaterTariffs(requestInfo, tenantId);
 
+		boolean actualBasis = org.egov.wscalculation.djbmonthlybilling.model.enums.BillingBasis.ACTUAL
+				.equals(request.getBillingBasis())
+				|| org.egov.wscalculation.djbmonthlybilling.model.enums.BillingBasis.CORRECTED_ACTUAL
+						.equals(request.getBillingBasis());
+		BigDecimal billingPeriodMonths = BigDecimal.ONE;
+		long calendarBillingMonths = 1L;
+		if (actualBasis) {
+			if (request.getBillingPeriodMonths() != null) {
+				billingPeriodMonths = request.getBillingPeriodMonths();
+			} else if (request.getBillingPeriodFrom() != null && request.getBillingPeriodTo() != null) {
+				billingPeriodMonths = DJBConsumptionPeriodUtil.toDjbBillingPeriodMonths(
+						request.getBillingPeriodFrom(), request.getBillingPeriodTo());
+			}
+			if (request.getCalendarBillingMonths() != null) {
+				calendarBillingMonths = request.getCalendarBillingMonths();
+			} else if (request.getBillingPeriodFrom() != null && request.getBillingPeriodTo() != null) {
+				calendarBillingMonths = DJBConsumptionPeriodUtil.calculateBillingMonths(
+						request.getBillingPeriodFrom(), request.getBillingPeriodTo());
+			}
+		}
 		TariffCalculationResult water = tariffCalculationService.calculate(request.getConsumption(),
-				request.getTariffCategory(), tariffs);
+				request.getTariffCategory(), tariffs, billingPeriodMonths, calendarBillingMonths,
+				request.getBillingPeriodFrom(), request.getBillingPeriodTo());
 
 		List<DJBMonthlySewerageRule> sewerRules = masterProvider.getSewerageRules(requestInfo, tenantId);
 
@@ -63,7 +84,10 @@ public class DJBMonthlyBillingTestService {
 				.sewerConnectionAvailable(request.isSewerConnectionAvailable())
 				.additionalWaterSource(request.isAdditionalWaterSource())
 				.consumerCategory(request.getConsumerCategory()).propertyUsage(request.getPropertyUsage())
-				.builtUpAreaSqm(request.getBuiltUpAreaSqm()).numberOfRooms(request.getNumberOfRooms())
+				.builtUpAreaSqm(request.getBuiltUpAreaSqm())
+				.billingPeriodMonths(water.getBillingPeriodMonths())
+				.functionalSiteCount(request.getFunctionalSiteCount())
+				.numberOfRooms(request.getNumberOfRooms())
 				.numberOfBeds(request.getNumberOfBeds()).build();
 
 		SewerageCalculationResult sewerage = sewerageCalculationService.calculate(sewerContext, sewerRules,
@@ -75,11 +99,14 @@ public class DJBMonthlyBillingTestService {
 		List<DJBMonthlyRebate> rebates = masterProvider.getRebates(requestInfo, tenantId);
 
 		RebateCalculationContext rebateContext = RebateCalculationContext.builder()
-				.consumption(request.getConsumption()).billingBasis(request.getBillingBasis())
+				.consumption(request.getConsumption()).monthlyConsumption(water.getMonthlyConsumption())
+				.billingBasis(request.getBillingBasis())
 				.readingQualityCode(request.getReadingQualityCode()).consumerType(request.getConsumerCategory())
 				.propertyCategory(request.getConsumerCategory()).connectionType(request.getTariffCategory())
 				.bulkConnection(request.isBulkConnection()).dwellingUnitCount(request.getDwellingUnitCount())
-				.propertyAreaSqm(request.getBuiltUpAreaSqm()).functionalRwh(request.isFunctionalRwh())
+				.propertyAreaSqm(request.getPropertyAreaSqm() == null
+						? request.getBuiltUpAreaSqm() : request.getPropertyAreaSqm())
+				.functionalRwh(request.isFunctionalRwh())
 				.functionalWastewaterRecycling(request.isFunctionalWastewaterRecycling())
 				.djbEmployeeEligible(request.isDjbEmployeeEligible())
 				.eligibleConnectionCount(request.getEligibleConnectionCount())
@@ -90,6 +117,10 @@ public class DJBMonthlyBillingTestService {
 
 		BigDecimal netAmount = totalBeforeRebate.subtract(rebate.getTotalRebate()).setScale(MONEY_SCALE,
 				RoundingMode.HALF_UP);
+		if (netAmount.signum() < 0) {
+			throw new IllegalStateException("DJB test net amount cannot be negative: " + netAmount
+					+ ". Verify rebate eligibility and stacking configuration.");
+		}
 
 		return DJBMonthlyBillingTestResponse.builder().tenantId(tenantId).connectionNo(request.getConnectionNo())
 				.readingQualityCode(request.getReadingQualityCode())

@@ -69,10 +69,14 @@ public class SewerageCalculationService {
 				.filter(r -> !"WATER_CONNECTED".equalsIgnoreCase(r.getCode()))
 				.filter(r -> "ALL".equalsIgnoreCase(normalize(r.getCategory()))
 						|| category.equals(normalize(r.getCategory())))
-				.filter(r -> withinArea(r, context.getBuiltUpAreaSqm())).map(DJBMonthlySewerageRule::getAmount)
+				.filter(r -> Boolean.FALSE.equals(r.getRequiresWaterConnection())
+						|| r.getRequiresWaterConnection() == null)
+				.filter(r -> withinArea(r, context.getBuiltUpAreaSqm()))
+				.sorted(Comparator.comparing(this::areaRangeStart).reversed())
+				.map(DJBMonthlySewerageRule::getAmount)
 				.filter(Objects::nonNull).findFirst().orElse(BigDecimal.ZERO);
 
-		return money(monthlyAmount.multiply(BigDecimal.valueOf(resolveBillingMonths(context))));
+		return money(monthlyAmount.multiply(resolveBillingPeriodMonths(context)));
 	}
 
 	private AdditionalChargeSelection calculateAdditional(SewerageCalculationContext context,
@@ -87,7 +91,7 @@ public class SewerageCalculationService {
 		List<DJBAdditionalSewerageCharge> matches = rules.stream().filter(Objects::nonNull)
 				.filter(r -> !Boolean.FALSE.equals(r.getActive()))
 				.filter(r -> usage.equals(normalize(r.getPropertyUsage())))
-				.sorted(Comparator.comparing(this::rangeStart)).collect(Collectors.toList());
+				.sorted(Comparator.comparing(this::rangeStart).reversed()).collect(Collectors.toList());
 
 		for (DJBAdditionalSewerageCharge rule : matches) {
 			if (!rangeMatches(rule, context)) {
@@ -104,10 +108,25 @@ public class SewerageCalculationService {
 			SewerageCalculationContext context) {
 
 		String type = normalize(rule.getChargeType());
-		long billingMonths = resolveBillingMonths(context);
+		BigDecimal billingPeriodMonths = resolveBillingPeriodMonths(context);
+
+		if ("FIXED_PER_SITE".equals(type)
+				|| ("FIXED_MONTHLY".equals(type)
+						&& "FUNCTIONAL_SITE".equalsIgnoreCase(normalize(rule.getUnit())))) {
+			// DJB Table 7 states banquet hall charges as Rs.10,000 per functional
+			// site, not as a monthly recurring charge.
+			if (context.getFunctionalSiteCount() == null) {
+				throw new IllegalArgumentException(
+						"Functional site count is required for banquet-hall sewerage charge");
+			}
+			if (context.getFunctionalSiteCount() < 0) {
+				throw new IllegalArgumentException("Functional site count cannot be negative");
+			}
+			return money(value(rule.getAmount()).multiply(BigDecimal.valueOf(context.getFunctionalSiteCount())));
+		}
 
 		if ("FIXED_MONTHLY".equals(type)) {
-			return money(value(rule.getAmount()).multiply(BigDecimal.valueOf(billingMonths)));
+			return money(value(rule.getAmount()).multiply(billingPeriodMonths));
 		}
 
 		if ("BASE_PLUS_PER_BLOCK".equals(type)) {
@@ -127,7 +146,7 @@ public class SewerageCalculationService {
 			BigDecimal monthlyAmount = value(rule.getBaseAmount())
 					.add(value(rule.getBlockAmount()).multiply(BigDecimal.valueOf(blocks)));
 
-			return money(monthlyAmount.multiply(BigDecimal.valueOf(billingMonths)));
+			return money(monthlyAmount.multiply(billingPeriodMonths));
 		}
 
 		throw new IllegalArgumentException("Unsupported additional sewerage charge type: " + rule.getChargeType());
@@ -156,8 +175,11 @@ public class SewerageCalculationService {
 		if (area == null) {
 			return false;
 		}
-		if (rule.getMinBuiltUpAreaSqm() != null && area.compareTo(rule.getMinBuiltUpAreaSqm()) < 0) {
-			return false;
+		if (rule.getMinBuiltUpAreaSqm() != null) {
+			int comparison = area.compareTo(rule.getMinBuiltUpAreaSqm());
+			if (Boolean.TRUE.equals(rule.getMinBuiltUpAreaExclusive()) ? comparison <= 0 : comparison < 0) {
+				return false;
+			}
 		}
 		return rule.getMaxBuiltUpAreaSqm() == null || area.compareTo(rule.getMaxBuiltUpAreaSqm()) <= 0;
 	}
@@ -176,8 +198,16 @@ public class SewerageCalculationService {
 				.filter(r -> !"WATER_CONNECTED".equalsIgnoreCase(r.getCode()))
 				.filter(r -> "ALL".equalsIgnoreCase(normalize(r.getCategory()))
 						|| category.equals(normalize(r.getCategory())))
-				.filter(r -> withinArea(r, context.getBuiltUpAreaSqm())).map(DJBMonthlySewerageRule::getCode)
+				.filter(r -> Boolean.FALSE.equals(r.getRequiresWaterConnection())
+						|| r.getRequiresWaterConnection() == null)
+				.filter(r -> withinArea(r, context.getBuiltUpAreaSqm()))
+				.sorted(Comparator.comparing(this::areaRangeStart).reversed())
+				.map(DJBMonthlySewerageRule::getCode)
 				.findFirst().orElse(null);
+	}
+
+	private BigDecimal areaRangeStart(DJBMonthlySewerageRule rule) {
+		return rule.getMinBuiltUpAreaSqm() == null ? BigDecimal.ZERO : rule.getMinBuiltUpAreaSqm();
 	}
 
 	private BigDecimal rangeStart(DJBAdditionalSewerageCharge rule) {
@@ -185,11 +215,15 @@ public class SewerageCalculationService {
 		return value == null ? BigDecimal.ZERO : BigDecimal.valueOf(value);
 	}
 
-	private long resolveBillingMonths(SewerageCalculationContext context) {
-		if (context == null || context.getBillingMonths() == null || context.getBillingMonths() <= 0) {
-			return 1L;
+	private BigDecimal resolveBillingPeriodMonths(SewerageCalculationContext context) {
+		if (context != null && context.getBillingPeriodMonths() != null
+				&& context.getBillingPeriodMonths().signum() > 0) {
+			return context.getBillingPeriodMonths();
 		}
-		return context.getBillingMonths().longValue();
+		if (context == null || context.getBillingMonths() == null || context.getBillingMonths() <= 0) {
+			return BigDecimal.ONE;
+		}
+		return BigDecimal.valueOf(context.getBillingMonths());
 	}
 
 	private BigDecimal money(BigDecimal value) {

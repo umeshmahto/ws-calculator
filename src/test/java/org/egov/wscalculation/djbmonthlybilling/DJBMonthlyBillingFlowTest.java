@@ -83,13 +83,13 @@ class DJBMonthlyBillingFlowTest {
 		DJBMonthlyBillingTestResponse response = service
 				.calculate(request("CONN-002", "DOMESTIC", "25", "OK", BillingBasis.ACTUAL));
 
-		assertBigDecimalEquals("659.00", response.getWater().getWaterVolumetricCharge());
+		assertBigDecimalEquals("237.20", response.getWater().getWaterVolumetricCharge());
 		assertBigDecimalEquals("219.62", response.getWater().getServiceCharge());
-		assertBigDecimalEquals("878.62", response.getWater().getTotalWaterCharge());
+		assertBigDecimalEquals("456.82", response.getWater().getTotalWaterCharge());
 
-		assertBigDecimalEquals("395.40", response.getSewerage().getTotalSewerageCharge());
-		assertBigDecimalEquals("1274.02", response.getTotalBeforeRebate());
-		assertBigDecimalEquals("1274.02", response.getNetAmountAfterRebate());
+		assertBigDecimalEquals("142.32", response.getSewerage().getTotalSewerageCharge());
+		assertBigDecimalEquals("599.14", response.getTotalBeforeRebate());
+		assertBigDecimalEquals("599.14", response.getNetAmountAfterRebate());
 	}
 
 	@Test
@@ -97,13 +97,13 @@ class DJBMonthlyBillingFlowTest {
 		DJBMonthlyBillingTestResponse response = service
 				.calculate(request("CONN-003", "DOMESTIC", "35", "OK", BillingBasis.ACTUAL));
 
-		assertBigDecimalEquals("1537.55", response.getWater().getWaterVolumetricCharge());
+		assertBigDecimalEquals("588.65", response.getWater().getWaterVolumetricCharge());
 		assertBigDecimalEquals("292.82", response.getWater().getServiceCharge());
-		assertBigDecimalEquals("1830.37", response.getWater().getTotalWaterCharge());
+		assertBigDecimalEquals("881.47", response.getWater().getTotalWaterCharge());
 
-		assertBigDecimalEquals("922.53", response.getSewerage().getTotalSewerageCharge());
-		assertBigDecimalEquals("2752.90", response.getTotalBeforeRebate());
-		assertBigDecimalEquals("2752.90", response.getNetAmountAfterRebate());
+		assertBigDecimalEquals("353.19", response.getSewerage().getTotalSewerageCharge());
+		assertBigDecimalEquals("1234.66", response.getTotalBeforeRebate());
+		assertBigDecimalEquals("1234.66", response.getNetAmountAfterRebate());
 	}
 
 	@Test

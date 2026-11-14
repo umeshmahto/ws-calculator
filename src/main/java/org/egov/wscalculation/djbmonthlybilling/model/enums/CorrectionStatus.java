@@ -8,7 +8,8 @@ public enum CorrectionStatus {
     PENDING("PENDING"),
     IN_PROGRESS("IN_PROGRESS"),
     COMPLETED("COMPLETED"),
-    FAILED("FAILED");
+    FAILED("FAILED"),
+    MANUAL_REVIEW_REQUIRED("MANUAL_REVIEW_REQUIRED");
 
     private final String value;
 

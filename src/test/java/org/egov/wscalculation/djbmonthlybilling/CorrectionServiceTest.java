@@ -90,6 +90,32 @@ class CorrectionServiceTest {
 	}
 
 	@Test
+	void shouldReturnManualReviewRequiredWhenAnyInterveningRqcIsNotAutoCorrectable() {
+		String tenantId = "dl.djb";
+		String connectionNo = "WS/DJB/2026-27/000367";
+		WaterBillingCycle previousOk = cycle("ok-1", BillingBasis.ACTUAL, 100L, 200L);
+		previousOk.setCurrentreading(new BigDecimal("100"));
+		WaterBillingCycle unsupported = cycle("avg-1", BillingBasis.AVERAGE, 200L, 300L);
+		unsupported.setReadingqualitycode("UNSUPPORTED_RQC");
+		WaterBillingCycle currentOk = cycle("ok-2", BillingBasis.ACTUAL, 300L, 400L);
+		currentOk.setCurrentreading(new BigDecimal("150"));
+		currentOk.setReadingqualitycode("OK");
+
+		when(billingCycleDao.findPreviousOkByConnectionBefore(eq(tenantId), eq(connectionNo),
+				eq(currentOk.getBillingperiodto()))).thenReturn(previousOk);
+		when(billingCycleDao.findCyclesForCorrection(eq(tenantId), eq(connectionNo),
+				eq(previousOk.getBillingperiodto()), eq(currentOk.getBillingperiodto())))
+				.thenReturn(Collections.singletonList(unsupported));
+
+		CorrectionService.CorrectionPlanResult result = service.processAutomaticCorrection(
+				new RequestInfo(), tenantId, currentOk, "SYSTEM", 12345L);
+
+		assertTrue(result.isManualReviewRequired());
+		assertTrue(result.getReason().contains("manual/ZRO review"));
+		assertTrue(!result.isCorrectionRequired());
+	}
+
+	@Test
 	void shouldCapturePaidAdjustmentFromInterveningEstimatedDemand() {
 		String tenantId = "dl.djb";
 		String connectionNo = "WS/DJB/2026-27/000367";
@@ -229,6 +255,32 @@ class CorrectionServiceTest {
 
 		assertTrue(!plan.isCorrectionRequired());
 		assertEquals(0, plan.getCyclesToCorrect().size());
+	}
+
+	@Test
+	void shouldBlockWholeAutomaticCorrectionWhenEligibleAndUnsupportedEstimatedCyclesAreMixed() {
+		String tenantId = "dl.djb";
+		String connectionNo = "WS/DJB/2026-27/000367";
+		WaterBillingCycle previousOk = cycle("ok-1", BillingBasis.ACTUAL, 100L, 200L);
+		previousOk.setCurrentreading(new BigDecimal("100"));
+		WaterBillingCycle eligible = cycle("avg-1", BillingBasis.AVERAGE, 200L, 300L);
+		eligible.setReadingqualitycode("MLOC");
+		WaterBillingCycle unsupported = cycle("avg-2", BillingBasis.AVERAGE, 300L, 400L);
+		unsupported.setReadingqualitycode("UNSUPPORTED_RQC");
+		WaterBillingCycle currentOk = cycle("ok-2", BillingBasis.ACTUAL, 400L, 500L);
+		currentOk.setCurrentreading(new BigDecimal("160"));
+		currentOk.setReadingqualitycode("OK");
+
+		when(billingCycleDao.findPreviousOkByConnectionBefore(eq(tenantId), eq(connectionNo),
+				eq(currentOk.getBillingperiodto()))).thenReturn(previousOk);
+		when(billingCycleDao.findCyclesForCorrection(eq(tenantId), eq(connectionNo),
+				eq(previousOk.getBillingperiodto()), eq(currentOk.getBillingperiodto())))
+				.thenReturn(Arrays.asList(eligible, unsupported));
+
+		CorrectionPlan plan = service.buildCorrectionPlan(tenantId, currentOk);
+		assertTrue(!plan.isCorrectionRequired());
+		assertEquals(0, plan.getCyclesToCorrect().size());
+		org.junit.jupiter.api.Assertions.assertTrue(plan.getReason().contains("manual/ZRO review"));
 	}
 
 	private WaterBillingCycle cycle(String id, BillingBasis basis, long from, long to) {

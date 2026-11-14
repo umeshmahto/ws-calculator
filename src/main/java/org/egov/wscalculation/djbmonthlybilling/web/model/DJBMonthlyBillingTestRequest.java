@@ -19,6 +19,11 @@ public class DJBMonthlyBillingTestRequest {
 
 	private BigDecimal consumption;
 
+	private BigDecimal billingPeriodMonths;
+	private Long billingPeriodFrom;
+	private Long billingPeriodTo;
+	private Long calendarBillingMonths;
+
 	private BigDecimal previousConsumption;
 
 	private BillingBasis billingBasis;
@@ -32,6 +37,8 @@ public class DJBMonthlyBillingTestRequest {
 	private String propertyUsage;
 
 	private BigDecimal builtUpAreaSqm;
+	private BigDecimal propertyAreaSqm;
+	private Integer functionalSiteCount;
 	private Integer numberOfRooms;
 	private Integer numberOfBeds;
 

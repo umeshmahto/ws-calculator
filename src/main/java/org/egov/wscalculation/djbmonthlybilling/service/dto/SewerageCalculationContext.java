@@ -17,7 +17,13 @@ public class SewerageCalculationContext {
     private Integer numberOfRooms;
     private Integer numberOfBeds;
 
-    /** Number of DJB billing months represented by the meter-to-meter cycle. */
+    /** Legacy whole calendar-month count retained for compatibility/reporting. */
     @Builder.Default
     private Integer billingMonths = 1;
+
+    /** Fractional 30-day billing factor used for monthly fixed charges (e.g. 81 days = 2.7). */
+    private BigDecimal billingPeriodMonths;
+
+    /** Number of functional banquet-hall sites; defaults to one site when not supplied. */
+    private Integer functionalSiteCount;
 }

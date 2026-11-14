@@ -28,7 +28,8 @@ class DJBMonthlyBillingMlocNullReadingTest {
     private static final long CURRENT_PERIOD_FROM = 1767292200000L;
     private static final long CURRENT_PERIOD_TO = 1769884200000L;
     // 12 calendar months before CURRENT_PERIOD_TO, aligned with ConsumptionService UTC lookback calculation.
-    private static final long LOOKBACK_FROM = 1738281600000L;
+    // 12 calendar months before CURRENT_PERIOD_TO at 00:00 Asia/Kolkata.
+    private static final long LOOKBACK_FROM = 1738348200000L;
 
     @Mock
     private WaterBillingCycleDao billingCycleDao;
@@ -65,7 +66,8 @@ class DJBMonthlyBillingMlocNullReadingTest {
                 .build();
 
         WaterBillingCycle actual = new WaterBillingCycle();
-		actual.setBillingperiodfrom(1764599400000L);
+		// Exactly 30 DJB-local days before CURRENT_PERIOD_FROM.
+		actual.setBillingperiodfrom(1764700200000L);
 		actual.setBillingperiodto(CURRENT_PERIOD_FROM);
         actual.setBillingconsumption(new BigDecimal("18"));
 

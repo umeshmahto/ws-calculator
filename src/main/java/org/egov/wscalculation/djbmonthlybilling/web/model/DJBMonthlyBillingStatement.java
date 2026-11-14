@@ -156,6 +156,7 @@ public class DJBMonthlyBillingStatement {
 		private BigDecimal consumption;
 		private BigDecimal monthlyConsumption;
 		private Long billingMonths;
+		private BigDecimal billingPeriodMonths;
 		private String unit;
 		private String tariffId;
 		private String category;
