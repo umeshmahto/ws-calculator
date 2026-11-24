@@ -114,6 +114,13 @@ public class WSCalculationServiceImpl implements WSCalculationService {
 			connectionRequest = request.getIsconnectionCalculation();
 		}
 		demandService.generateDemand(request, calculations, masterMap, connectionRequest);
+
+		if (!Boolean.TRUE.equals(request.getIsconnectionCalculation())
+				&& !Boolean.TRUE.equals(request.getIsDisconnectionRequest())
+				&& !Boolean.TRUE.equals(request.getIsReconnectionRequest())) {
+			demandService.enrichFeeEstimatesWithPaymentStatus(calculations, request.getRequestInfo());
+		}
+
 		unsetWaterConnection(calculations);
 		return calculations;
 	}
@@ -133,6 +140,7 @@ public class WSCalculationServiceImpl implements WSCalculationService {
 			calculations = getDisconnectionFeeCalculation(request, masterData);
 		} else {
 			calculations = getFeeCalculation(request, masterData);
+            demandService.enrichFeeEstimatesWithPaymentStatus(calculations, request.getRequestInfo());
 		}
 		unsetWaterConnection(calculations);
 		return calculations;
