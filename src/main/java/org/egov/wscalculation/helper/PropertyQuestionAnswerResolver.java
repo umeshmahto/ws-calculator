@@ -9,13 +9,6 @@ import java.util.Map;
 /**
  * Resolves property-specific answers using stable questionCode values.
  *
- * Persisted payload contract:
- * additionalDetails.questions = [
- *   { "questionCode": "numberOfDwellingUnits", "answer": "2" }
- * ]
- *
- * Display text is deliberately not used as an identifier. This allows the UI to
- * localize questionCode independently without changing calculation behaviour.
  * Legacy sibling fields (numberOfDwellingUnits, numberOfBeds, numberOfRooms,
  * numberOfStudents, numberOfStaff, etc.) are deliberately ignored.
  */
@@ -169,11 +162,11 @@ public final class PropertyQuestionAnswerResolver {
                 throw new IllegalArgumentException("Each additionalDetails.questions item must contain questionCode and answer.");
             }
             Map<?, ?> item = (Map<?, ?>) rawQuestion;
-            Object rawCode = item.get("questionCode");
-            if (rawCode == null || rawCode.toString().trim().isEmpty()) {
-                throw new IllegalArgumentException("Each property question answer must contain questionCode. Display labels are not identifiers.");
+            String rawCode = resolveQuestionCode(item);
+            if (rawCode == null || rawCode.trim().isEmpty()) {
+                throw new IllegalArgumentException("Each property question answer must contain questionCode, or a stable code in the question field. Display labels are not identifiers.");
             }
-            String code = normalizeCode(rawCode.toString());
+            String code = normalizeCode(rawCode);
             Object rawAnswer = item.get("answer");
             String answer = rawAnswer == null ? null : rawAnswer.toString().trim();
             String previous = answers.putIfAbsent(code, answer);
@@ -182,6 +175,24 @@ public final class PropertyQuestionAnswerResolver {
             }
         }
         return answers;
+    }
+
+    private static String resolveQuestionCode(Map<?, ?> item) {
+        Object rawCode = item.get("questionCode");
+        if (rawCode != null && !rawCode.toString().trim().isEmpty()) {
+            return rawCode.toString().trim();
+        }
+
+        Object rawQuestion = item.get("question");
+        if (rawQuestion == null) {
+            return null;
+        }
+
+        String candidate = rawQuestion.toString().trim();
+        if (candidate.matches("[A-Za-z][A-Za-z0-9_]*")) {
+            return candidate;
+        }
+        return null;
     }
 
     private static String questionCodeFromDefinition(Object definition) {

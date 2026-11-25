@@ -26,6 +26,34 @@ class PropertyQuestionAnswerResolverTest {
     }
 
     @Test
+    void acceptsStableCodeInCurrentUiQuestionProperty() {
+        Map<String, Object> question = new LinkedHashMap<>();
+        question.put("answer", "760");
+        question.put("question", "totalStrengthIncludingStaffAndStudents");
+        Map<String, Object> details = details(question);
+
+        Map<String, BigDecimal> values = PropertyQuestionAnswerResolver.extractNumericAnswers(details);
+
+        assertEquals(new BigDecimal("760"),
+                values.get("total_strength_including_staff_and_students"));
+        PropertyQuestionAnswerResolver.validateRequiredQuestions(details,
+                Arrays.asList("totalStrengthIncludingStaffAndStudents"), "College");
+    }
+
+    @Test
+    void canonicalQuestionCodeTakesPrecedenceOverLocalizedQuestionLabel() {
+        Map<String, Object> question = new LinkedHashMap<>();
+        question.put("answer", "2");
+        question.put("questionCode", "numberOfDwellingUnits");
+        question.put("question", "Number of dwelling units");
+        Map<String, Object> details = details(question);
+
+        Map<String, BigDecimal> values = PropertyQuestionAnswerResolver.extractNumericAnswers(details);
+
+        assertEquals(new BigDecimal("2"), values.get("total_du"));
+    }
+
+    @Test
     void doesNotResolveAnAnswerFromLocalizedDisplayText() {
         Map<String, Object> legacy = new LinkedHashMap<>();
         legacy.put("question", "Number of dwelling units");
