@@ -472,7 +472,6 @@ public class WSCalculationConstant {
 
 	// --- Group A: Residential (Lodging / Rooming / Dwellings) ---
 	public static final String BUILT_UP_AREA = "builtUpArea";
-	public static final String NUMBER_OF_DWELLING_UNITS = "numberOfDwellingUnits";
 
 	// A-1 & A-3 Baseline
 	public static final BigDecimal RESIDENTIAL_AREA_PER_PERSON = BigDecimal.valueOf(25);
@@ -495,7 +494,6 @@ public class WSCalculationConstant {
 	public static final BigDecimal EWS_PERSONS_PER_DU = BigDecimal.valueOf(5);
 
 	// --- Group B: Educational (Colleges / Schools / Institutions) ---
-	public static final String NUMBER_OF_STUDENTS = "numberOfStudents";
 
 	public static final BigDecimal EDUCATIONAL_AREA_PER_PERSON = BigDecimal.valueOf(4); // 1 P / 4 sqm FAR area criteria
 	public static final BigDecimal EDUCATIONAL_LPCD = BigDecimal.valueOf(45);
@@ -504,7 +502,6 @@ public class WSCalculationConstant {
 	public static final BigDecimal UNIVERSITY_LPCD = BigDecimal.valueOf(45);
 
 	// --- Group C: Institutional (Hospitals / Sanatoria) ---
-	public static final String NUMBER_OF_BEDS = "numberOfBeds";
 	public static final BigDecimal HOSPITAL_LPCD = BigDecimal.valueOf(340); // Base tier: 340 LPCD up to 100 beds
 	public static final BigDecimal HOSPITAL_HIGH_TIER_LPCD = BigDecimal.valueOf(450); // Upper tier: 450 LPCD above 100 beds
 
@@ -531,7 +528,6 @@ public class WSCalculationConstant {
 	public static final BigDecimal CINEMA_LPCD = BigDecimal.valueOf(15);
 
 	// --- Hotels & Accommodation ---
-	public static final String NUMBER_OF_ROOMS = "numberOfRooms";
 	public static final BigDecimal HOTEL_LPCD = BigDecimal.valueOf(180);  // Group A-5 Hotels non-starred
 	public static final BigDecimal HOTEL_STARRED_LPCD = BigDecimal.valueOf(320); // Group A-6 Starred Hotels
 	public static final BigDecimal PERSONS_PER_ROOM = BigDecimal.valueOf(2);

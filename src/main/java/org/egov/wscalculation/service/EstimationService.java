@@ -1332,37 +1332,19 @@ public class EstimationService {
 	        additionalDetails.put("numberOfFloors", request.getNumberOfFloors());
 	    }
 
-	    // Physical Attributes & Context Variables
-	    if (request.getFarArea() != null) {
-	        additionalDetails.put("farArea", request.getFarArea());
-	    }
-	    if (request.getBuiltUpArea() != null) {
-	        additionalDetails.put("builtUpArea", request.getBuiltUpArea());
-	    }
-	    if (request.getNumberOfDwellingUnits() != null) {
-	        additionalDetails.put(WSCalculationConstant.NUMBER_OF_DWELLING_UNITS, request.getNumberOfDwellingUnits());
-	    }
-	    if (request.getNumberOfStudents() != null) {
-	        additionalDetails.put("numberOfStudents", request.getNumberOfStudents());
-	    }
+	    // Occupancy values are accepted only as stable questionCode/answer pairs.
+    // Do not write deprecated sibling fields such as numberOfDwellingUnits,
+    // numberOfBeds, numberOfRooms, numberOfStudents or numberOfStaff.
+    if (request.getQuestions() != null) {
+        additionalDetails.put("questions", request.getQuestions());
+    }
+    // OPD area is an optional area attribute used by C-4 when it is supplied
+    // from an approved source; it is not a separate occupancy-count field.
+    if (request.getOpdArea() != null) {
+        additionalDetails.put("opdArea", request.getOpdArea());
+    }
 
-	    // Standardized Capacity Keys (Fixed naming conventions: numberOfBeds, numberOfRooms, numberOfStaff)
-	    if (request.getNumberOfBeds() != null) {
-	        additionalDetails.put("numberOfBeds", request.getNumberOfBeds());
-	    }
-	    if (request.getNumberOfRooms() != null) {
-	        additionalDetails.put("numberOfRooms", request.getNumberOfRooms());
-	    }
-	    if (request.getNumberOfStaff() != null) {
-	        additionalDetails.put("numberOfStaff", request.getNumberOfStaff());
-	    }
-	    if (request.getOpdArea() != null) {
-	        additionalDetails.put("opdArea", request.getOpdArea());
-	    }
-	    if (request.getTotalStrengthIncludingStaffAndStudents() != null) {
-	        additionalDetails.put("totalStrengthIncludingStaffAndStudents", request.getTotalStrengthIncludingStaffAndStudents());
-	    }
-	    if (request.getServantQuarterArea() != null) {
+    if (request.getServantQuarterArea() != null) {
 	        additionalDetails.put("servantQuarterArea", request.getServantQuarterArea());
 	    }
 	    if (request.getIs12ABCertificate() != null) {

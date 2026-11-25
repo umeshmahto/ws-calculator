@@ -48,7 +48,9 @@ class WaterDemandCalculatorNorms2Test {
     @Test
     void residentialNormUsesTotalWaterAlways() {
         Map<String, Object> propertyDetails = details("A-1");
-        propertyDetails.put("numberOfDwellingUnits", new BigDecimal("2"));
+        // Deliberately conflict with the old sibling field: questionCode must win.
+        propertyDetails.put("numberOfDwellingUnits", new BigDecimal("99"));
+        propertyDetails.put("questions", Arrays.asList(questionAnswer("numberOfDwellingUnits", "2")));
         WaterDemandResult result = calculate(property("IndependentResidentialHouse", propertyDetails),
                 Arrays.asList(norm("A-1", "RESIDENTIAL", "total_du * 5", 225, 180, 45, "TOTAL_WATER_ALWAYS")));
 
@@ -62,8 +64,8 @@ class WaterDemandCalculatorNorms2Test {
     void institutionalNormAppliesPotableLpcdOnlyAfterThreshold() {
         Map<String, Object> propertyDetails = details("B-1");
         propertyDetails.put("builtUpArea", new BigDecimal("1200"));
-        propertyDetails.put("numberOfStudents", new BigDecimal("240"));
-        propertyDetails.put("numberOfStaff", new BigDecimal("10"));
+        propertyDetails.put("questions", Arrays.asList(
+                questionAnswer("totalStrengthIncludingStaffAndStudents", "250")));
         WaterDemandResult result = calculate(property("School", propertyDetails),
                 Arrays.asList(norm("B-1", "INSTITUTIONAL",
                         "MAX(built_up_area / 4.0, total_strength_including_staff_and_students)",
@@ -80,8 +82,10 @@ class WaterDemandCalculatorNorms2Test {
     void b1NormUsesAreaBasedOccupancyWhenStrengthIsNotCollected() {
         Map<String, Object> propertyDetails = details("B-1");
         propertyDetails.put("builtUpArea", new BigDecimal("800"));
-        // The DestituteHome PropertyType2 form does not collect staff/student
-        // strength, so the MAX formula must still use built_up_area / 4.
+        // B-1 has a required strength question. A zero answer leaves the area
+        // formula as the larger occupancy basis in this test.
+        propertyDetails.put("questions", Arrays.asList(
+                questionAnswer("totalStrengthIncludingStaffAndStudents", "0")));
         WaterDemandResult result = calculate(property("DestituteHome", propertyDetails),
                 Arrays.asList(norm("B-1", "INSTITUTIONAL",
                         "MAX(built_up_area / 4.0, total_strength_including_staff_and_students)",
@@ -166,8 +170,8 @@ class WaterDemandCalculatorNorms2Test {
     @Test
     void categoryC2UsesSpecifiedBedsWhenAvailable() {
         Map<String, Object> propertyDetails = details("C-2");
-        propertyDetails.put("numberOfBeds", new BigDecimal("50"));
-        propertyDetails.put("numberOfRooms", new BigDecimal("20"));
+        propertyDetails.put("questions", Arrays.asList(
+                questionAnswer("numberOfBeds", "50"), questionAnswer("numberOfRooms", "20")));
         propertyDetails.put("builtUpArea", new BigDecimal("1000"));
         WaterDemandResult result = calculate(property("Hotel", propertyDetails),
                 Arrays.asList(normWithFormula("C-2", "COMMERCIAL",
@@ -183,7 +187,7 @@ class WaterDemandCalculatorNorms2Test {
     @Test
     void categoryC2FallsBackToHigherOfRoomsAndBuiltUpAreaWhenBedsAreNotSpecified() {
         Map<String, Object> propertyDetails = details("C-2");
-        propertyDetails.put("numberOfRooms", new BigDecimal("40"));
+        propertyDetails.put("questions", Arrays.asList(questionAnswer("numberOfRooms", "40")));
         propertyDetails.put("builtUpArea", new BigDecimal("1250"));
         WaterDemandResult result = calculate(property("Hotel", propertyDetails),
                 Arrays.asList(normWithFormula("C-2", "COMMERCIAL",
@@ -200,9 +204,9 @@ class WaterDemandCalculatorNorms2Test {
     @Test
     void categoryC1UsesHigherOfSanctionedBedsAndAreaBasedBeds() {
         Map<String, Object> propertyDetails = details("C-1");
-        propertyDetails.put("numberOfBeds", new BigDecimal("10"));
+        propertyDetails.put("questions", Arrays.asList(questionAnswer("numberOfBeds", "10")));
         propertyDetails.put("builtUpArea", new BigDecimal("1500"));
-        WaterDemandResult result = calculate(property("GuestHouse", propertyDetails),
+        WaterDemandResult result = calculate(property("GovernmentHostel", propertyDetails),
                 Arrays.asList(norm("C-1", "COMMERCIAL", "MAX(sanctioned_beds, built_up_area / 7.5)",
                         180, 135, 45, "POTABLE_ONLY_IF_OVER_12500")));
 
@@ -229,7 +233,7 @@ class WaterDemandCalculatorNorms2Test {
     @Test
     void hospitalNormEvaluatesTotalAndPotableLpcdFormulas() {
         Map<String, Object> propertyDetails = details("C-4");
-        propertyDetails.put("numberOfBeds", new BigDecimal("30"));
+        propertyDetails.put("questions", Arrays.asList(questionAnswer("numberOfBeds", "30")));
         propertyDetails.put("builtUpArea", new BigDecimal("1000"));
         propertyDetails.put("plotArea", new BigDecimal("3000"));
         WaterDemandResult result = calculate(property("Hospital", propertyDetails),
@@ -246,7 +250,7 @@ class WaterDemandCalculatorNorms2Test {
     @Test
     void hospitalNormSwitchesToPotableLpcdAboveOneHundredBedsAndThreshold() {
         Map<String, Object> propertyDetails = details("C-4");
-        propertyDetails.put("numberOfBeds", new BigDecimal("101"));
+        propertyDetails.put("questions", Arrays.asList(questionAnswer("numberOfBeds", "101")));
         propertyDetails.put("builtUpArea", new BigDecimal("1000"));
         propertyDetails.put("plotArea", new BigDecimal("3000"));
         WaterDemandResult result = calculate(property("Hospital", propertyDetails),
@@ -263,7 +267,7 @@ class WaterDemandCalculatorNorms2Test {
     @Test
     void nursingHomeUsesOneBedPerSixtySquareMetresAsMinimum() {
         Map<String, Object> propertyDetails = details("C-4");
-        propertyDetails.put("numberOfBeds", new BigDecimal("10"));
+        propertyDetails.put("questions", Arrays.asList(questionAnswer("numberOfBeds", "10")));
         propertyDetails.put("builtUpArea", new BigDecimal("1200"));
         propertyDetails.put("plotArea", new BigDecimal("2000"));
         WaterDemandResult result = calculate(property("NursingHome", propertyDetails),
@@ -277,7 +281,7 @@ class WaterDemandCalculatorNorms2Test {
     @Test
     void ddaFlatPropertyIfcOverrideIsZeroWithoutChangingOccupancyNorm() {
         Map<String, Object> propertyDetails = details("A-1");
-        propertyDetails.put("numberOfDwellingUnits", new BigDecimal("2"));
+        propertyDetails.put("questions", Arrays.asList(questionAnswer("numberOfDwellingUnits", "2")));
         propertyDetails.put("ifcOverride", "ZERO");
         WaterDemandResult result = calculate(property("DDAFlat", propertyDetails),
                 Arrays.asList(norm("A-1", "RESIDENTIAL", "total_du * 5", 225, 180, 45, "TOTAL_WATER_ALWAYS")));
@@ -333,6 +337,17 @@ class WaterDemandCalculatorNorms2Test {
                 "RESIDENTIAL".equalsIgnoreCase(propertyCategory) ? "Domestic" : "Non-Domestic"));
         propertyTypeEntry.put("demandNormCode", normCode);
         propertyTypeEntry.put("active", true);
+        List<String> configuredQuestionCodes = new java.util.ArrayList<>();
+        Object rawQuestionAnswers = selectedDetails.get("questions");
+        if (rawQuestionAnswers instanceof Iterable<?>) {
+            for (Object rawQuestionAnswer : (Iterable<?>) rawQuestionAnswers) {
+                if (rawQuestionAnswer instanceof Map<?, ?>) {
+                    Object code = ((Map<?, ?>) rawQuestionAnswer).get("questionCode");
+                    if (code != null) configuredQuestionCodes.add(code.toString());
+                }
+            }
+        }
+        propertyTypeEntry.put("questions", configuredQuestionCodes);
         if (selectedDetails.get("demandNormSubType") != null) {
             propertyTypeEntry.put("demandNormSubType", selectedDetails.get("demandNormSubType"));
         } else if ("B-2".equals(normCode)) {
@@ -372,6 +387,13 @@ class WaterDemandCalculatorNorms2Test {
         Map<String, Object> details = new LinkedHashMap<>();
         details.put("demandNormCode", normCode);
         return details;
+    }
+
+    private Map<String, Object> questionAnswer(String questionCode, String answer) {
+        Map<String, Object> question = new LinkedHashMap<>();
+        question.put("questionCode", questionCode);
+        question.put("answer", answer);
+        return question;
     }
 
     private Map<String, Object> norm(String code, String parent, String occupancyFormula,

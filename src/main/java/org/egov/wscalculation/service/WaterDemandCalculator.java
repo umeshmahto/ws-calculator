@@ -10,6 +10,7 @@ import java.util.Set;
 
 import org.egov.wscalculation.helper.ExpressionEvaluator;
 import org.egov.wscalculation.helper.PropertyContextExtractor;
+import org.egov.wscalculation.helper.PropertyQuestionAnswerResolver;
 import org.egov.wscalculation.helper.UsageCodeResolver;
 import org.egov.wscalculation.service.strategy.GroupDemandStrategy;
 import org.egov.wscalculation.service.strategy.WaterDemandStrategyFactory;
@@ -124,6 +125,22 @@ public class WaterDemandCalculator {
         String parentUsageCode = matchedNorm.get("parentUsageCode") == null
                 ? "" : matchedNorm.get("parentUsageCode").toString().trim();
         GroupDemandStrategy strategy = strategyFactory.getStrategy(usageCode, parentUsageCode);
+
+        // PropertyType2.questions contains stable question codes. Answers must be
+        // persisted as additionalDetails.questions[{questionCode, answer}]. Missing
+        // configured inputs fail fast; legacy sibling fields are never fallbacks.
+        Map<String, Object> propertyTypeEntry = usageCodeResolver.findPropertyType2Record(masterData, property.getPropertyType());
+        if (propertyTypeEntry == null) {
+            throw new IllegalStateException("Selected PropertyType2 record was not found for property type '"
+                    + property.getPropertyType() + "'.");
+        }
+        Map<String, Object> propertyDetails = contextExtractor.getPropertyAdditionalDetailsMap(property);
+        PropertyQuestionAnswerResolver.validateRequiredQuestions(propertyDetails,
+                propertyTypeEntry.get("questions"), property.getPropertyType());
+        Object selectedCategoryType = propertyDetails.get("categoryType");
+        PropertyQuestionAnswerResolver.validateCategoryTypeSelection(propertyDetails, propertyTypeEntry,
+                selectedCategoryType == null ? null : selectedCategoryType.toString());
+
         Map<String, BigDecimal> context = contextExtractor.extractContextVariablesForNormsV2(property);
 
         // B-2 has two IFC calculation bases, but both use the same Commercial

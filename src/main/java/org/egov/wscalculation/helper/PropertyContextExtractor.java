@@ -3,7 +3,6 @@ package org.egov.wscalculation.helper;
 import java.math.BigDecimal;
 import java.util.HashMap;
 import java.util.Map;
-import org.egov.wscalculation.constants.WSCalculationConstant;
 import org.egov.wscalculation.web.models.Property;
 import org.springframework.stereotype.Component;
 
@@ -47,41 +46,15 @@ public class PropertyContextExtractor {
 
         BigDecimal plotArea = property.getLandArea() != null ? BigDecimal.valueOf(property.getLandArea()) : getBigDecimalFromMap(details, "plotArea");
 
-        BigDecimal duCount = getBigDecimalFromMap(details, WSCalculationConstant.NUMBER_OF_DWELLING_UNITS);
-        if (duCount.compareTo(BigDecimal.ZERO) == 0) {
-            duCount = getBigDecimalFromMap(details, "numberOfDwellingUnits");
-        }
-
-        BigDecimal bedsCount = getBigDecimalFromMap(details, "sanctioned_beds");
-        if (bedsCount.compareTo(BigDecimal.ZERO) == 0) {
-            bedsCount = getBigDecimalFromMap(details, "sanctionedBeds");
-        }
-        if (bedsCount.compareTo(BigDecimal.ZERO) == 0) {
-            bedsCount = getBigDecimalFromMap(details, "noOfBeds");
-        }
-        if (bedsCount.compareTo(BigDecimal.ZERO) == 0) {
-            bedsCount = getBigDecimalFromMap(details, "numberOfBeds");
-        }
-
-        BigDecimal roomsCount = getBigDecimalFromMap(details, "noOfRooms");
-        if (roomsCount.compareTo(BigDecimal.ZERO) == 0) {
-            roomsCount = getBigDecimalFromMap(details, "numberOfRooms");
-        }
-
-        BigDecimal studentsCount = getBigDecimalFromMap(details, "numberOfStudents");
-        if (studentsCount.compareTo(BigDecimal.ZERO) == 0) {
-            studentsCount = getBigDecimalFromMap(details, "noOfStudents");
-        }
-        
-        BigDecimal seatsCount = getBigDecimalFromMap(details, "noOfSeats");
-        if (seatsCount.compareTo(BigDecimal.ZERO) == 0) {
-            seatsCount = getBigDecimalFromMap(details, "numberOfSeats");
-        }
-
-        BigDecimal staffCount = getBigDecimalFromMap(details, "noOfStaff");
-        if (staffCount.compareTo(BigDecimal.ZERO) == 0) {
-            staffCount = getBigDecimalFromMap(details, "numberOfStaff");
-        }
+        // All occupancy values are sourced from questions[] by stable questionCode.
+        // Legacy sibling fields such as numberOfDwellingUnits/numberOfBeds are ignored.
+        Map<String, BigDecimal> questionAnswers = PropertyQuestionAnswerResolver.extractNumericAnswers(details);
+        BigDecimal duCount = questionAnswers.getOrDefault("total_du", BigDecimal.ZERO);
+        BigDecimal bedsCount = questionAnswers.getOrDefault("sanctioned_beds", BigDecimal.ZERO);
+        BigDecimal roomsCount = questionAnswers.getOrDefault("total_rooms", BigDecimal.ZERO);
+        BigDecimal studentsCount = questionAnswers.getOrDefault("total_strength_including_staff_and_students", BigDecimal.ZERO);
+        BigDecimal seatsCount = BigDecimal.ZERO;
+        BigDecimal staffCount = BigDecimal.ZERO;
 
         BigDecimal sqArea = getBigDecimalFromMap(details, "servantQuarterArea");
         if (sqArea.compareTo(BigDecimal.ZERO) == 0) {
@@ -141,23 +114,21 @@ public class PropertyContextExtractor {
         BigDecimal plotArea = property != null && property.getLandArea() != null
                 ? BigDecimal.valueOf(property.getLandArea())
                 : firstPositive(details, "plotArea", "plot_area", "landArea", "land_area");
-        BigDecimal duCount = firstPositive(details, WSCalculationConstant.NUMBER_OF_DWELLING_UNITS,
-                "numberOfDwellingUnits", "totalDU", "total_du", "dwellingUnits");
-
-        BigDecimal bedsCount = firstPositive(details, "sanctioned_beds", "sanctionedBeds", "numberOfBeds",
-                "noOfBeds", "totalBeds", "total_beds", "beds");
-        BigDecimal roomsCount = firstPositive(details, "noOfRooms", "numberOfRooms", "totalRooms", "total_rooms");
-        BigDecimal studentsCount = firstPositive(details, "numberOfStudents", "noOfStudents", "totalStudents", "total_students");
-        BigDecimal staffCount = firstPositive(details, "numberOfStaff", "noOfStaff", "totalStaff", "total_staff");
-        BigDecimal seatsCount = firstPositive(details, "noOfSeats", "numberOfSeats", "totalSeats", "total_seats");
+        // Question answers are the only source for occupancy/capacity inputs.
+        // Do not read numberOfDwellingUnits, numberOfBeds, numberOfRooms, students
+        // or staff from sibling additionalDetails fields.
+        Map<String, BigDecimal> questionAnswers = PropertyQuestionAnswerResolver.extractNumericAnswers(details);
+        BigDecimal duCount = questionAnswers.getOrDefault("total_du", BigDecimal.ZERO);
+        BigDecimal bedsCount = questionAnswers.getOrDefault("sanctioned_beds", BigDecimal.ZERO);
+        BigDecimal roomsCount = questionAnswers.getOrDefault("total_rooms", BigDecimal.ZERO);
+        BigDecimal studentsCount = BigDecimal.ZERO;
+        BigDecimal staffCount = BigDecimal.ZERO;
+        BigDecimal seatsCount = BigDecimal.ZERO;
         BigDecimal servantQuarterArea = firstPositive(details, "servantQuarterArea", "sqArea", "sq_area");
 
-        BigDecimal totalStrength = firstPositive(details, "totalStrengthIncludingStaffAndStudents",
-                "total_strength_including_staff_and_students", "totalStrengthIncludingBothShifts",
-                "totalStudentsAndStaff", "total_students_and_staff", "doubleShiftTotalStrength", "totalStrength");
-        if (totalStrength.compareTo(BigDecimal.ZERO) <= 0) {
-            totalStrength = studentsCount.add(staffCount);
-        }
+        BigDecimal totalStrengthIncludingStaffAndStudents = questionAnswers.getOrDefault(
+                "total_strength_including_staff_and_students", BigDecimal.ZERO);
+        BigDecimal totalStrength = questionAnswers.getOrDefault("total_strength", BigDecimal.ZERO);
 
         vars.put("far_area", farArea);
         vars.put("non_far_area", nonFarArea);
@@ -175,10 +146,10 @@ public class PropertyContextExtractor {
         vars.put("sanctioned_beds_is_specified", bedsCount.compareTo(BigDecimal.ZERO) > 0 ? BigDecimal.ONE : BigDecimal.ZERO);
         vars.put("total_rooms", roomsCount);
         vars.put("number_of_rooms", roomsCount);
-        vars.put("highest_shift_strength", studentsCount);
+        vars.put("highest_shift_strength", totalStrengthIncludingStaffAndStudents);
         vars.put("total_students", studentsCount);
         vars.put("total_staff", staffCount);
-        vars.put("total_strength_including_staff_and_students", totalStrength);
+        vars.put("total_strength_including_staff_and_students", totalStrengthIncludingStaffAndStudents);
         vars.put("total_strength", totalStrength);
         vars.put("total_seats", seatsCount);
         vars.put("sq_area", servantQuarterArea);

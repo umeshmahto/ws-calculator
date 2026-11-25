@@ -35,6 +35,7 @@ import org.egov.wscalculation.producer.WSCalculationProducer;
 import org.egov.wscalculation.repository.DemandRepository;
 import org.egov.wscalculation.repository.ServiceRequestRepository;
 import org.egov.wscalculation.util.CalculatorUtil;
+import org.egov.wscalculation.helper.PropertyQuestionAnswerResolver;
 import org.egov.wscalculation.util.WSCalculationUtil;
 import org.egov.wscalculation.web.models.Demand;
 import org.egov.wscalculation.web.models.DemandDetail;
@@ -237,8 +238,7 @@ public class DJBMonthlyDemandService {
 				.consumerType(resolveConsumerType(category)).propertyCategory(resolvePropertyCategory(category))
 				.connectionType(category)
 				.bulkConnection(readBooleanDetail(connection, property, "bulkConnection", "isBulkConnection", "bulk"))
-				.dwellingUnitCount(readIntegerDetail(property, connection, "numberOfDwellingUnits",
-						"dwellingUnitCount", "noOfDwellingUnits", "totalDwellingUnits"))
+				.dwellingUnitCount(readDwellingUnitCountFromQuestion(property))
 				.propertyAreaSqm(property.getLandArea() == null ? null : BigDecimal.valueOf(property.getLandArea())).functionalRwh(
 						readBooleanDetail(connection, property, "functionalRwh", "isFunctionalRwh",
 								"rwhFunctional", "rainWaterHarvestingFunctional"))
@@ -753,6 +753,24 @@ public class DJBMonthlyDemandService {
 			return false;
 		}
 		throw new IllegalArgumentException("Invalid boolean sewer-connection flag: " + normalized);
+	}
+
+	/**
+	 * DJB dwelling-unit rebate uses the same questionCode answer as A-1 water
+	 * demand. Deprecated sibling fields are intentionally not consulted.
+	 */
+	private Integer readDwellingUnitCountFromQuestion(Property property) {
+		Map<String, Object> propertyDetails = toMap(property == null ? null : property.getAdditionalDetails());
+		BigDecimal answer = PropertyQuestionAnswerResolver.getNumericAnswer(propertyDetails,
+				PropertyQuestionAnswerResolver.NUMBER_OF_DWELLING_UNITS);
+		if (answer == null) {
+			return null;
+		}
+		try {
+			return answer.intValueExact();
+		} catch (ArithmeticException ex) {
+			throw new IllegalArgumentException("Question answer for numberOfDwellingUnits must be a whole number.", ex);
+		}
 	}
 
 	private Integer readIntegerDetail(Object primary, Object secondary, String... keys) {

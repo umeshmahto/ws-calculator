@@ -10,6 +10,7 @@ import org.egov.common.contract.request.RequestInfo;
 import javax.validation.Valid;
 import javax.validation.constraints.NotNull;
 import java.math.BigDecimal;
+import java.util.List;
 
 @Data
 @Builder
@@ -59,29 +60,14 @@ public class EstimationRequest {
     @JsonProperty("numberOfFloors")
     private Integer numberOfFloors;
 
-    // --- Occupancy Parameters (Category specific inputs) ---
-    @JsonProperty("numberOfDwellingUnits")
-    private BigDecimal numberOfDwellingUnits; // Residential
-
-    @JsonProperty("numberOfStudents")
-    private BigDecimal numberOfStudents; // Educational
-
-    @JsonProperty("numberOfBeds")
-    private BigDecimal numberOfBeds; // Hospitals / Nursing Homes
+    // Occupancy inputs are supplied as questionCode/answer pairs, matching the
+    // Property.additionalDetails.questions payload persisted by PropertyTax.
+    @JsonProperty("questions")
+    private List<PropertyQuestionAnswer> questions;
 
     @JsonProperty("opdArea")
     private BigDecimal opdArea;
 
-    @JsonProperty("numberOfRooms")
-    private BigDecimal numberOfRooms; // Hotels / Lodges
-
-    @JsonProperty("numberOfStaff")
-    private BigDecimal numberOfStaff; // Offices
-
-    /** Total strength including students and staff; for double-shift schools this must include both shifts. */
-    @JsonProperty("totalStrengthIncludingStaffAndStudents")
-    private BigDecimal totalStrengthIncludingStaffAndStudents;
-    
     @JsonProperty("servantQuarterArea")
     private Double servantQuarterArea; // Servant
 
