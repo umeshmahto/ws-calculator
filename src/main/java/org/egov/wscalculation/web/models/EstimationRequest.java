@@ -67,7 +67,10 @@ public class EstimationRequest {
     private BigDecimal numberOfStudents; // Educational
 
     @JsonProperty("numberOfBeds")
-    private BigDecimal numberOfBeds; // Hospitals
+    private BigDecimal numberOfBeds; // Hospitals / Nursing Homes
+
+    @JsonProperty("opdArea")
+    private BigDecimal opdArea;
 
     @JsonProperty("numberOfRooms")
     private BigDecimal numberOfRooms; // Hotels / Lodges

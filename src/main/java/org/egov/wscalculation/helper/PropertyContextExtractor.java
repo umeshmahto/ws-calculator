@@ -183,6 +183,23 @@ public class PropertyContextExtractor {
         vars.put("total_seats", seatsCount);
         vars.put("sq_area", servantQuarterArea);
 
+        // Revised DJB C-4 and B-2 use-class inputs. The property type itself is
+        // already selected in the common property form; these are derived flags,
+        // not additional citizen questions.
+        BigDecimal opdArea = firstPositive(details, "opdArea", "opd_area", "opdBuiltUpArea", "opdSectionArea");
+        vars.put("opd_area", opdArea);
+        // B-2 MERCANTILE/ASSEMBLY is resolved from PropertyType2.demandNormSubType
+        // by WaterDemandCalculator. Do not infer this IFC rule from display labels.
+        vars.put("is_assembly_use", BigDecimal.ZERO);
+        String propertyType = property == null ? "" : String.valueOf(property.getPropertyType());
+        String normalizedType = propertyType.toUpperCase(java.util.Locale.ROOT);
+        BigDecimal hospitalFlag = normalizedType.contains("HOSPITAL") ? BigDecimal.ONE : BigDecimal.ZERO;
+        vars.put("is_hospital_property", hospitalFlag);
+        BigDecimal minimumBedsByArea = hospitalFlag.compareTo(BigDecimal.ZERO) > 0
+                ? builtUpArea.divide(new BigDecimal("80"), 8, java.math.RoundingMode.CEILING)
+                : builtUpArea.divide(new BigDecimal("60"), 8, java.math.RoundingMode.CEILING);
+        vars.put("minimum_beds_by_area", minimumBedsByArea);
+
         return vars;
     }
 
@@ -237,6 +254,15 @@ public class PropertyContextExtractor {
             }
         }
         return BigDecimal.ZERO;
+    }
+
+    private String firstNonBlank(Map<String, Object> details, String... keys) {
+        if (details == null) return null;
+        for (String key : keys) {
+            Object value = details.get(key);
+            if (value != null && !value.toString().trim().isEmpty()) return value.toString().trim();
+        }
+        return null;
     }
 
     public Map<String, Object> getPropertyAdditionalDetailsMap(Property property) {

@@ -3,7 +3,7 @@ package org.egov.wscalculation.service.strategy.impl;
 import org.egov.wscalculation.helper.ExpressionEvaluator;
 import org.springframework.stereotype.Component;
 
-/** Strategy for revised Group A: residential demand (norm code A). */
+/** Strategy for revised Group A: residential demand (norm code A-1). */
 @Component
 public class GroupADemandStrategy extends AbstractWaterDemandGroupStrategy {
 
@@ -13,7 +13,7 @@ public class GroupADemandStrategy extends AbstractWaterDemandGroupStrategy {
 
     @Override
     public boolean supports(String subCategoryCode, String parentUsageCode) {
-        return subCategoryCode != null && "A".equalsIgnoreCase(subCategoryCode.trim())
+        return subCategoryCode != null && "A-1".equalsIgnoreCase(subCategoryCode.trim())
                 && "RESIDENTIAL".equalsIgnoreCase(parentUsageCode == null ? "" : parentUsageCode.trim());
     }
 

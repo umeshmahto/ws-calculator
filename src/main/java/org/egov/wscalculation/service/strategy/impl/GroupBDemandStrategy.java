@@ -19,8 +19,25 @@ public class GroupBDemandStrategy extends AbstractWaterDemandGroupStrategy {
 
     @Override
     public boolean supports(String subCategoryCode, String parentUsageCode) {
-        return subCategoryCode != null && SUPPORTED_CODES.contains(normalize(subCategoryCode))
-                && "INSTITUTIONAL".equalsIgnoreCase(parentUsageCode == null ? "" : parentUsageCode.trim());
+        if (subCategoryCode == null) {
+            return false;
+        }
+        String code = normalize(subCategoryCode);
+        String parent = parentUsageCode == null ? "" : parentUsageCode.trim().toUpperCase(java.util.Locale.ROOT);
+        if (!SUPPORTED_CODES.contains(code)) {
+            return false;
+        }
+        switch (code) {
+            case "B-1":
+                return "INSTITUTIONAL".equals(parent);
+            case "B-2":
+            case "B-4":
+                return "COMMERCIAL".equals(parent);
+            case "B-3":
+                return "COMMERCIAL".equals(parent) || "INDUSTRIAL".equals(parent);
+            default:
+                return false;
+        }
     }
 
     @Override

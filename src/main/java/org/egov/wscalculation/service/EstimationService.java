@@ -1310,7 +1310,7 @@ public class EstimationService {
 	    Map<String, Object> masterData = masterDataService.loadExemptionMaster(request.getRequestInfo(), tenantId);
 
 	    String extractedDemandNormCode = validateAndExtractDemandNormCode(masterData,
-	            request.getPropertyType(), request.getUsageCategory(), request.getPropertyCategory());
+	            request.getPropertyType(), request.getUsageCategory(), request.getPropertyCategory(), request.getCategoryType());
 	    validateColonyCategory(masterData, request.getColonyCategory());
 
 	    Map<String, Object> additionalDetails = new LinkedHashMap<>();
@@ -1355,6 +1355,9 @@ public class EstimationService {
 	    }
 	    if (request.getNumberOfStaff() != null) {
 	        additionalDetails.put("numberOfStaff", request.getNumberOfStaff());
+	    }
+	    if (request.getOpdArea() != null) {
+	        additionalDetails.put("opdArea", request.getOpdArea());
 	    }
 	    if (request.getTotalStrengthIncludingStaffAndStudents() != null) {
 	        additionalDetails.put("totalStrengthIncludingStaffAndStudents", request.getTotalStrengthIncludingStaffAndStudents());
@@ -1521,7 +1524,7 @@ public class EstimationService {
 	 * a substitute because the revised WaterDemandNorms2 classification differs.
 	 */
 	private String validateAndExtractDemandNormCode(Map<String, Object> masterData, String propertyType,
-			String usageCategory, String propertyCategory) {
+			String usageCategory, String propertyCategory, String categoryType) {
 	    if (masterData == null || masterData.isEmpty()) {
 	        throw new CustomException("MDMS_DATA_ERROR", "Master Data is null or empty.");
 	    }
@@ -1533,7 +1536,7 @@ public class EstimationService {
 
 	    try {
 	        String resolvedCode = usageCodeResolver.resolveDemandNormCodeFromSelection(masterData,
-	                propertyType, usageCategory, propertyCategory);
+	                propertyType, usageCategory, propertyCategory, categoryType);
 	        if (StringUtils.hasText(resolvedCode)) {
 	            return resolvedCode;
 	        }

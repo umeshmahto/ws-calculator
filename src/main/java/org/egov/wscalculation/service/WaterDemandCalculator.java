@@ -126,13 +126,75 @@ public class WaterDemandCalculator {
         GroupDemandStrategy strategy = strategyFactory.getStrategy(usageCode, parentUsageCode);
         Map<String, BigDecimal> context = contextExtractor.extractContextVariablesForNormsV2(property);
 
+        // B-2 has two IFC calculation bases, but both use the same Commercial
+        // property category and the same B-2 water-demand formula. The use class
+        // is taken from the selected PropertyType2 record, never guessed from a label.
+        if ("B-2".equalsIgnoreCase(usageCode)) {
+            String useClass = usageCodeResolver.resolveDemandNormSubType(masterData, property.getPropertyType());
+            if (!"MERCANTILE".equalsIgnoreCase(useClass) && !"ASSEMBLY".equalsIgnoreCase(useClass)) {
+                throw new IllegalStateException("Selected B-2 PropertyType2 entry '" + property.getPropertyType()
+                        + "' must configure demandNormSubType as MERCANTILE or ASSEMBLY.");
+            }
+            context.put("is_assembly_use", "ASSEMBLY".equalsIgnoreCase(useClass) ? BigDecimal.ONE : BigDecimal.ZERO);
+        }
+
         result.setMatchedNormCode(usageCode);
         result.setMatchedNormName(matchedNorm.get("name") == null ? null : matchedNorm.get("name").toString());
         result.setContextVariables(context);
         strategy.processGroupDemand(result, matchedNorm, context);
+        applyPropertyIfcOverride(property, masterData, matchedNorm, result);
 
         printCalculationReport(property, matchedNorm, result);
         return result;
+    }
+
+    /**
+     * Applies property-specific IFC exceptions configured in PropertyType2 or in
+     * WaterDemandNorms2.ifcExceptions. Water demand occupancy/rates remain in the
+     * result for audit, while the chargeable IFC demand is overridden to zero.
+     */
+    @SuppressWarnings("unchecked")
+    private void applyPropertyIfcOverride(Property property, Map<String, Object> masterData,
+            Map<String, Object> matchedNorm, WaterDemandResult result) {
+        String propertyTypeCode = property == null ? null : property.getPropertyType();
+        String override = usageCodeResolver.resolvePropertyIfcOverride(masterData, propertyTypeCode);
+        String reason = null;
+
+        if (StringUtils.isBlank(override)) {
+            Object exceptions = matchedNorm.get("ifcExceptions");
+            if (exceptions instanceof List) {
+                for (Object item : (List<?>) exceptions) {
+                    if (!(item instanceof Map)) continue;
+                    Map<String, Object> exception = (Map<String, Object>) item;
+                    Object exceptionCode = exception.get("propertyTypeCode");
+                    if (exceptionCode != null && propertyTypeCode != null
+                            && propertyTypeCode.equalsIgnoreCase(exceptionCode.toString().trim())) {
+                        Object configuredOverride = exception.get("ifcCalculationBasis");
+                        override = configuredOverride == null ? null : configuredOverride.toString().trim();
+                        Object configuredReason = exception.get("reason");
+                        reason = configuredReason == null ? null : configuredReason.toString();
+                        break;
+                    }
+                }
+            }
+        }
+
+        if ("ZERO".equalsIgnoreCase(override)) {
+            if (StringUtils.isBlank(reason)) {
+                Map<String, Object> propertyTypeEntry = usageCodeResolver.findPropertyType2Record(masterData, propertyTypeCode);
+                Object configuredReason = propertyTypeEntry == null ? null : propertyTypeEntry.get("ifcOverrideReason");
+                reason = configuredReason == null ? "IFC amount overridden to zero by MDMS." : configuredReason.toString();
+            }
+            result.setCalculationBasisApplied("ZERO");
+            result.setChosenLpcd(BigDecimal.ZERO);
+            result.setBaseDemand(BigDecimal.ZERO);
+            result.setTotalWaterDemand(BigDecimal.ZERO);
+            result.setPotableThresholdApplied(Boolean.FALSE);
+            result.setIfcOverrideReason(reason);
+        } else if (StringUtils.isNotBlank(override)) {
+            throw new IllegalStateException("Unsupported PropertyType2 IFC override '" + override
+                    + "' for property type '" + propertyTypeCode + "'.");
+        }
     }
 
     private WaterDemandResult emptyResult() {
@@ -191,9 +253,11 @@ public class WaterDemandCalculator {
         trace.put("standardTotalLpcd", result.getStandardTotalLpcd());
         trace.put("potableLpcd", result.getPotableLpcd());
         trace.put("nonPotableLpcd", result.getNonPotableLpcd());
+        trace.put("opdPotableDemandLPD", result.getOpdPotableDemand());
         trace.put("chosenLpcd", result.getChosenLpcd());
         trace.put("contingencyPercentage", result.getContingencyPercentage());
         trace.put("ifcCalculationBasis", result.getCalculationBasisApplied());
+        trace.put("ifcOverrideReason", result.getIfcOverrideReason());
         trace.put("potableThresholdApplied", result.getPotableThresholdApplied());
         trace.put("baseDemand", result.getBaseDemand());
         trace.put("totalWaterDemand", result.getTotalWaterDemand());

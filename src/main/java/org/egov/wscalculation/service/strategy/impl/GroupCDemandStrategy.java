@@ -19,8 +19,18 @@ public class GroupCDemandStrategy extends AbstractWaterDemandGroupStrategy {
 
     @Override
     public boolean supports(String subCategoryCode, String parentUsageCode) {
-        return subCategoryCode != null && SUPPORTED_CODES.contains(normalize(subCategoryCode))
-                && "COMMERCIAL".equalsIgnoreCase(parentUsageCode == null ? "" : parentUsageCode.trim());
+        if (subCategoryCode == null) {
+            return false;
+        }
+        String code = normalize(subCategoryCode);
+        String parent = parentUsageCode == null ? "" : parentUsageCode.trim().toUpperCase(java.util.Locale.ROOT);
+        if (!SUPPORTED_CODES.contains(code)) {
+            return false;
+        }
+        if ("C-4".equals(code)) {
+            return "INSTITUTIONAL".equals(parent);
+        }
+        return "COMMERCIAL".equals(parent);
     }
 
     @Override

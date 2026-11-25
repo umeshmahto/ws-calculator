@@ -47,10 +47,10 @@ class WaterDemandCalculatorNorms2Test {
 
     @Test
     void residentialNormUsesTotalWaterAlways() {
-        Map<String, Object> propertyDetails = details("A");
+        Map<String, Object> propertyDetails = details("A-1");
         propertyDetails.put("numberOfDwellingUnits", new BigDecimal("2"));
         WaterDemandResult result = calculate(property("IndependentResidentialHouse", propertyDetails),
-                Arrays.asList(norm("A", "RESIDENTIAL", "total_du * 5", 225, 180, 45, "TOTAL_WATER_ALWAYS")));
+                Arrays.asList(norm("A-1", "RESIDENTIAL", "total_du * 5", 225, 180, 45, "TOTAL_WATER_ALWAYS")));
 
         assertEquals(new BigDecimal("10"), result.getCalculatedOccupancy());
         assertEquals(new BigDecimal("225"), result.getChosenLpcd());
@@ -98,7 +98,7 @@ class WaterDemandCalculatorNorms2Test {
         Map<String, Object> propertyDetails = details("B-2");
         propertyDetails.put("builtUpArea", new BigDecimal("90"));
         WaterDemandResult result = calculate(property("StationaryShop", propertyDetails),
-                Arrays.asList(norm("B-2", "INSTITUTIONAL", "built_up_area / 4.5",
+                Arrays.asList(norm("B-2", "COMMERCIAL", "built_up_area / 4.5",
                         45, 15, 30, "POTABLE_ONLY_IF_OVER_12500")));
 
         assertEquals(new BigDecimal("20"), result.getCalculatedOccupancy());
@@ -112,7 +112,7 @@ class WaterDemandCalculatorNorms2Test {
         Map<String, Object> propertyDetails = details("B-3");
         propertyDetails.put("builtUpArea", new BigDecimal("1000"));
         WaterDemandResult result = calculate(property("Office", propertyDetails),
-                Arrays.asList(norm("B-3", "INSTITUTIONAL", "built_up_area / 10.0",
+                Arrays.asList(norm("B-3", "COMMERCIAL", "built_up_area / 10.0",
                         45, 15, 30, "POTABLE_ONLY_IF_OVER_12500")));
 
         assertEquals(new BigDecimal("100"), result.getCalculatedOccupancy());
@@ -125,12 +125,42 @@ class WaterDemandCalculatorNorms2Test {
         Map<String, Object> propertyDetails = details("B-4");
         propertyDetails.put("builtUpArea", new BigDecimal("3000"));
         WaterDemandResult result = calculate(property("WarehouseGodown", propertyDetails),
-                Arrays.asList(norm("B-4", "INSTITUTIONAL", "built_up_area / 30.0",
+                Arrays.asList(norm("B-4", "COMMERCIAL", "built_up_area / 30.0",
                         45, 15, 30, "POTABLE_ONLY_IF_OVER_12500")));
 
         assertEquals(new BigDecimal("100"), result.getCalculatedOccupancy());
         assertEquals(new BigDecimal("45"), result.getChosenLpcd());
         assertEquals(new BigDecimal("4500.00"), result.getTotalWaterDemand());
+    }
+
+    @Test
+    void categoryB3SupportsIndustrialParentCategory() {
+        Map<String, Object> propertyDetails = details("B-3");
+        propertyDetails.put("builtUpArea", new BigDecimal("1000"));
+        Map<String, Object> b3 = norm("B-3", "COMMERCIAL", "built_up_area / 10.0",
+                45, 15, 30, "POTABLE_ONLY_IF_OVER_12500");
+        b3.put("parentUsageCodes", Arrays.asList("COMMERCIAL", "INDUSTRIAL"));
+        propertyDetails.put("propertyCategory", "Industrial");
+        WaterDemandResult result = calculate(property("GeneralIndustrialUnit", propertyDetails), Arrays.asList(b3));
+        assertEquals(new BigDecimal("100"), result.getCalculatedOccupancy());
+        assertEquals(new BigDecimal("4500.00"), result.getTotalWaterDemand());
+    }
+
+    @Test
+    void b2AssemblyUsesTotalDemandAlwaysWhenConfiguredByUseClass() {
+        Map<String, Object> propertyDetails = details("B-2");
+        propertyDetails.put("builtUpArea", new BigDecimal("400"));
+        propertyDetails.put("demandNormSubType", "ASSEMBLY");
+        Map<String, Object> b2 = norm("B-2", "COMMERCIAL", "built_up_area / 4.5",
+                45, 15, 30, "CONDITIONAL_BY_USE_CLASS");
+        Map<String, Object> basisByUse = new LinkedHashMap<>();
+        basisByUse.put("MERCANTILE", "POTABLE_ONLY_IF_OVER_12500");
+        basisByUse.put("ASSEMBLY", "TOTAL_WATER_ALWAYS");
+        b2.put("ifcCalculationBasisByUseClass", basisByUse);
+        WaterDemandResult result = calculate(property("AssemblyHall", propertyDetails), Arrays.asList(b2));
+        assertEquals(new BigDecimal("89"), result.getCalculatedOccupancy());
+        assertEquals(new BigDecimal("45"), result.getChosenLpcd());
+        assertFalse(result.getPotableThresholdApplied());
     }
 
     @Test
@@ -200,21 +230,25 @@ class WaterDemandCalculatorNorms2Test {
     void hospitalNormEvaluatesTotalAndPotableLpcdFormulas() {
         Map<String, Object> propertyDetails = details("C-4");
         propertyDetails.put("numberOfBeds", new BigDecimal("30"));
+        propertyDetails.put("builtUpArea", new BigDecimal("1000"));
+        propertyDetails.put("plotArea", new BigDecimal("3000"));
         WaterDemandResult result = calculate(property("Hospital", propertyDetails),
                 Arrays.asList(hospitalNorm()));
 
         assertEquals(new BigDecimal("30"), result.getCalculatedOccupancy());
         assertEquals(new BigDecimal("340"), result.getStandardTotalLpcd());
         assertEquals(new BigDecimal("250"), result.getPotableLpcd());
-        assertEquals(new BigDecimal("340"), result.getChosenLpcd());
-        assertEquals(new BigDecimal("10200.00"), result.getTotalWaterDemand());
-        assertFalse(result.getPotableThresholdApplied());
+        assertEquals(new BigDecimal("250"), result.getChosenLpcd());
+        assertEquals(new BigDecimal("18150.00"), result.getTotalWaterDemand());
+        assertTrue(result.getPotableThresholdApplied());
     }
 
     @Test
     void hospitalNormSwitchesToPotableLpcdAboveOneHundredBedsAndThreshold() {
         Map<String, Object> propertyDetails = details("C-4");
         propertyDetails.put("numberOfBeds", new BigDecimal("101"));
+        propertyDetails.put("builtUpArea", new BigDecimal("1000"));
+        propertyDetails.put("plotArea", new BigDecimal("3000"));
         WaterDemandResult result = calculate(property("Hospital", propertyDetails),
                 Arrays.asList(hospitalNorm()));
 
@@ -222,8 +256,36 @@ class WaterDemandCalculatorNorms2Test {
         assertEquals(new BigDecimal("450"), result.getStandardTotalLpcd());
         assertEquals(new BigDecimal("360"), result.getPotableLpcd());
         assertEquals(new BigDecimal("360"), result.getChosenLpcd());
-        assertEquals(new BigDecimal("36360.00"), result.getTotalWaterDemand());
+        assertEquals(new BigDecimal("73326.00"), result.getTotalWaterDemand());
         assertTrue(result.getPotableThresholdApplied());
+    }
+
+    @Test
+    void nursingHomeUsesOneBedPerSixtySquareMetresAsMinimum() {
+        Map<String, Object> propertyDetails = details("C-4");
+        propertyDetails.put("numberOfBeds", new BigDecimal("10"));
+        propertyDetails.put("builtUpArea", new BigDecimal("1200"));
+        propertyDetails.put("plotArea", new BigDecimal("2000"));
+        WaterDemandResult result = calculate(property("NursingHome", propertyDetails),
+                Arrays.asList(hospitalNorm()));
+        // Nursing home minimum is 1 bed / 60 sqm: 1,200 / 60 = 20 beds.
+        assertEquals(new BigDecimal("20"), result.getCalculatedOccupancy());
+        assertEquals(new BigDecimal("10"), result.getContingencyPercentage());
+        assertEquals(new BigDecimal("6000"), result.getOpdPotableDemand());
+    }
+
+    @Test
+    void ddaFlatPropertyIfcOverrideIsZeroWithoutChangingOccupancyNorm() {
+        Map<String, Object> propertyDetails = details("A-1");
+        propertyDetails.put("numberOfDwellingUnits", new BigDecimal("2"));
+        propertyDetails.put("ifcOverride", "ZERO");
+        WaterDemandResult result = calculate(property("DDAFlat", propertyDetails),
+                Arrays.asList(norm("A-1", "RESIDENTIAL", "total_du * 5", 225, 180, 45, "TOTAL_WATER_ALWAYS")));
+
+        assertEquals(new BigDecimal("10"), result.getCalculatedOccupancy());
+        assertEquals(new BigDecimal("0"), result.getTotalWaterDemand());
+        assertEquals("ZERO", result.getCalculationBasisApplied());
+        assertEquals("Unit test zero IFC override.", result.getIfcOverrideReason());
     }
 
     @Test
@@ -235,7 +297,7 @@ class WaterDemandCalculatorNorms2Test {
         IllegalStateException exception = assertThrows(IllegalStateException.class,
                 () -> calculate(property("AssemblyHall", propertyDetails), Arrays.asList(legacyAssemblyNorm)));
 
-        assertTrue(exception.getMessage().contains("Supported revised norms are A, B-1..B-4 and C-1..C-4"));
+        assertTrue(exception.getMessage().contains("Supported revised norms are A-1, B-1..B-4 and C-1..C-4"));
     }
 
     @Test
@@ -253,7 +315,50 @@ class WaterDemandCalculatorNorms2Test {
     private WaterDemandResult calculate(Property property, List<Map<String, Object>> norms) {
         Map<String, Object> masterData = new HashMap<>();
         masterData.put("WaterDemandNorms2", norms);
+
+        Map<String, Object> selectedDetails = property.getAdditionalDetails() instanceof Map
+                ? (Map<String, Object>) property.getAdditionalDetails() : new HashMap<String, Object>();
+        String normCode = selectedDetails.get("demandNormCode").toString();
+        Map<String, Object> matchedNorm = norms.stream()
+                .filter(n -> normCode.equalsIgnoreCase(String.valueOf(n.get("subCategoryCode"))))
+                .findFirst().orElseThrow(IllegalStateException::new);
+        String propertyCategory = selectedDetails.get("propertyCategory") == null
+                ? String.valueOf(matchedNorm.get("parentUsageCode"))
+                : String.valueOf(selectedDetails.get("propertyCategory"));
+        Map<String, Object> propertyTypeEntry = new LinkedHashMap<>();
+        propertyTypeEntry.put("name", property.getPropertyType());
+        propertyTypeEntry.put("code", property.getPropertyType());
+        propertyTypeEntry.put("propertyCategory", propertyCategory);
+        propertyTypeEntry.put("categoryType", Arrays.asList(
+                "RESIDENTIAL".equalsIgnoreCase(propertyCategory) ? "Domestic" : "Non-Domestic"));
+        propertyTypeEntry.put("demandNormCode", normCode);
+        propertyTypeEntry.put("active", true);
+        if (selectedDetails.get("demandNormSubType") != null) {
+            propertyTypeEntry.put("demandNormSubType", selectedDetails.get("demandNormSubType"));
+        } else if ("B-2".equals(normCode)) {
+            propertyTypeEntry.put("demandNormSubType", "MERCANTILE");
+        }
+        if (selectedDetails.get("ifcOverride") != null) {
+            propertyTypeEntry.put("ifcOverride", selectedDetails.get("ifcOverride"));
+            propertyTypeEntry.put("ifcOverrideReason", "Unit test zero IFC override.");
+        }
+        masterData.put("PropertyType2", Arrays.asList(propertyTypeEntry));
+
+        List<Map<String, Object>> categories = new java.util.ArrayList<>();
+        categories.add(category("Residential", "RESIDENTIAL"));
+        categories.add(category("Commercial", "COMMERCIAL"));
+        categories.add(category("Institutional", "INSTITUTIONAL"));
+        categories.add(category("Industrial", "INDUSTRIAL"));
+        masterData.put("PropertyCategory", categories);
         return calculator.calculateAverageWaterDemand(property, masterData);
+    }
+
+    private Map<String, Object> category(String name, String code) {
+        Map<String, Object> category = new LinkedHashMap<>();
+        category.put("name", name);
+        category.put("code", code);
+        category.put("active", true);
+        return category;
     }
 
     private Property property(String propertyType, Map<String, Object> details) {
@@ -293,6 +398,8 @@ class WaterDemandCalculatorNorms2Test {
         norm.put("nonPotableLpcd", new BigDecimal(String.valueOf(nonPotableLpcd)));
         norm.put("contingencyPercentage", BigDecimal.ZERO);
         norm.put("ifcCalculationBasis", ifcBasis);
+        norm.put("ifcThresholdLpd", new BigDecimal("12500"));
+        norm.put("parentUsageCodes", Arrays.asList(parent));
         norm.put("isActive", true);
         return norm;
     }
@@ -300,16 +407,23 @@ class WaterDemandCalculatorNorms2Test {
     private Map<String, Object> hospitalNorm() {
         Map<String, Object> norm = new LinkedHashMap<>();
         norm.put("subCategoryCode", "C-4");
-        norm.put("parentUsageCode", "COMMERCIAL");
+        norm.put("parentUsageCode", "INSTITUTIONAL");
         norm.put("name", "Nursing Homes / Hospitals / Sanatoria");
         norm.put("minOccupancyFormula", "sanctioned_beds");
         norm.put("totalLpcd", null);
         norm.put("potableLpcd", null);
         norm.put("nonPotableLpcd", new BigDecimal("90"));
-        norm.put("totalLpcdFormula", "IF(sanctioned_beds <= 100, 340, 450)");
-        norm.put("potableLpcdFormula", "IF(sanctioned_beds <= 100, 250, 360)");
-        norm.put("contingencyPercentage", BigDecimal.ZERO);
+        norm.put("totalLpcdFormula", "IF(effective_beds <= 100, 340, 450)");
+        norm.put("potableLpcdFormula", "IF(effective_beds <= 100, 250, 360)");
+        norm.put("contingencyPercentage", new BigDecimal("10"));
+        norm.put("contingencyBasis", "TOTAL_CALCULATED_WATER_DEMAND_INCLUDING_OPD");
         norm.put("ifcCalculationBasis", "POTABLE_ONLY_IF_OVER_12500");
+        norm.put("ifcThresholdLpd", new BigDecimal("12500"));
+        norm.put("parentUsageCodes", Arrays.asList("INSTITUTIONAL"));
+        Map<String, Object> plotRules = new LinkedHashMap<>();
+        plotRules.put("HOSPITAL", "plot_area >= 2500");
+        plotRules.put("NURSING_HOME", "plot_area <= 2500");
+        norm.put("facilityPlotAreaRules", plotRules);
         norm.put("isActive", true);
         return norm;
     }

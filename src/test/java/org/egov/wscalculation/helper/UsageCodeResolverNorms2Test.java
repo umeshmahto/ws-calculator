@@ -1,7 +1,6 @@
 package org.egov.wscalculation.helper;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.util.Arrays;
@@ -24,82 +23,104 @@ class UsageCodeResolverNorms2Test {
     }
 
     @Test
-    void usesExplicitDemandNormCodeFromPropertyType2() {
-        Map<String, Object> entry = new LinkedHashMap<>();
-        entry.put("code", "Clinic");
-        entry.put("name", "Clinic");
-        entry.put("infrastructureCategory", "Category C3");
-        entry.put("demandNormCode", "B-3");
-        entry.put("active", true);
+    void resolvesB3ForIndustrialPropertyUsingOneCanonicalNorm() {
+        Map<String, Object> industrialType = propertyType("GeneralIndustrialUnit", "INDUSTRIAL", "B-3");
+        Map<String, Object> b3 = norm("B-3", "COMMERCIAL", Arrays.asList("COMMERCIAL", "INDUSTRIAL"));
+        Map<String, Object> masterData = masterData(industrialType, b3);
 
-        Map<String, Object> masterData = new LinkedHashMap<>();
-        masterData.put("PropertyType2", Arrays.asList(entry));
-
-        assertEquals("B-3", resolver.lookupDemandNormCodeFromMdms(masterData, "Clinic", "PropertyType2"));
+        assertEquals("B-3", resolver.resolveDemandNormCodeFromSelection(
+                masterData, "GeneralIndustrialUnit", "Bulk", "Industrial", "Non-Domestic"));
     }
 
     @Test
-    void doesNotInferRevisedNormFromLegacyInfrastructureCategory() {
-        Map<String, Object> entry = new LinkedHashMap<>();
-        entry.put("code", "Clinic");
-        entry.put("name", "Clinic");
-        entry.put("infrastructureCategory", "Category C3");
-        entry.put("active", true);
+    void resolvesB2SubtypeFromPropertyTypeMasterAndKeepsTopLevelCommercial() {
+        Map<String, Object> assemblyType = propertyType("BanquetMarriageHall", "COMMERCIAL", "B-2");
+        assemblyType.put("demandNormSubType", "ASSEMBLY");
+        Map<String, Object> b2 = norm("B-2", "COMMERCIAL", Arrays.asList("COMMERCIAL"));
+        Map<String, Object> masterData = masterData(assemblyType, b2);
 
-        Map<String, Object> masterData = new LinkedHashMap<>();
-        masterData.put("PropertyType2", Arrays.asList(entry));
-
-        assertNull(resolver.lookupDemandNormCodeFromMdms(masterData, "Clinic", "PropertyType2"));
+        assertEquals("B-2", resolver.resolveDemandNormCodeFromSelection(
+                masterData, "BanquetMarriageHall", "Bulk", "Commercial", "Non-Domestic"));
+        assertEquals("ASSEMBLY", resolver.resolveDemandNormSubType(masterData, "BanquetMarriageHall"));
     }
 
     @Test
-    void resolvesDestituteHomeToB1FromUniqueRevisedNormLabel() {
-        Map<String, Object> propertyType = new LinkedHashMap<>();
-        propertyType.put("code", "DestituteHome");
-        propertyType.put("name", "Destitute Home");
-        propertyType.put("propertyCategory", "Institutional");
-        propertyType.put("infrastructureCategory", "Category B1");
-        propertyType.put("active", true);
-
-        Map<String, Object> b1 = norm("B-1",
-                "Colleges / Schools / Destitute Homes / Charitable Homes / Universities", "INSTITUTIONAL");
-        Map<String, Object> b2 = norm("B-2", "Mercantile / Assembly / Petrol Pumps / Laundry", "INSTITUTIONAL");
-        Map<String, Object> b3 = norm("B-3", "Offices / Banks / Police / Laboratories / Clinics Without IPD or Beds", "INSTITUTIONAL");
-        Map<String, Object> b4 = norm("B-4", "Storage / Multilevel Parking / Cremation or Burial Ground", "INSTITUTIONAL");
-
-        Map<String, Object> masterData = new LinkedHashMap<>();
-        masterData.put("PropertyType2", Arrays.asList(propertyType));
-        masterData.put("WaterDemandNorms2", Arrays.asList(b1, b2, b3, b4));
-
-        assertEquals("B-1", resolver.resolveDemandNormCodeFromSelection(
-                masterData, "DestituteHome", "Institutional", "Institutional"));
-    }
-
-    @Test
-    void doesNotGuessWhenPropertyLabelMatchesMultipleRevisedNorms() {
-        Map<String, Object> propertyType = new LinkedHashMap<>();
-        propertyType.put("code", "Hotel");
-        propertyType.put("name", "Hotel");
-        propertyType.put("propertyCategory", "Commercial");
-        propertyType.put("active", true);
-
-        Map<String, Object> c1 = norm("C-1", "Hotels / Hostels / Dormitories / Lodging", "COMMERCIAL");
-        Map<String, Object> c2 = norm("C-2", "Hotels (3-Star and Above) / Resorts / Banquet Halls / Malls", "COMMERCIAL");
-        Map<String, Object> masterData = new LinkedHashMap<>();
-        masterData.put("PropertyType2", Arrays.asList(propertyType));
-        masterData.put("WaterDemandNorms2", Arrays.asList(c1, c2));
+    void requiresAllFourDjbPropertyCategoriesToBeActive() {
+        Map<String, Object> type = propertyType("School", "INSTITUTIONAL", "B-1");
+        Map<String, Object> norm = norm("B-1", "INSTITUTIONAL", Arrays.asList("INSTITUTIONAL"));
+        Map<String, Object> masterData = masterData(type, norm);
+        masterData.put("PropertyCategory", Arrays.asList(
+                category("Residential", "RESIDENTIAL"),
+                category("Commercial", "COMMERCIAL"),
+                category("Institutional", "INSTITUTIONAL")));
 
         assertThrows(IllegalStateException.class, () -> resolver.resolveDemandNormCodeFromSelection(
-                masterData, "Hotel", "Commercial", "Commercial"));
+                masterData, "School", "Bulk", "Institutional", "Non-Domestic"));
     }
 
-    private Map<String, Object> norm(String code, String name, String parentUsageCode) {
+    @Test
+    void rejectsPropertyCategoryThatDoesNotMatchPropertyType2() {
+        Map<String, Object> type = propertyType("BanquetMarriageHall", "COMMERCIAL", "B-2");
+        type.put("demandNormSubType", "ASSEMBLY");
+        Map<String, Object> masterData = masterData(type, norm("B-2", "COMMERCIAL", Arrays.asList("COMMERCIAL")));
+
+        assertThrows(IllegalStateException.class, () -> resolver.resolveDemandNormCodeFromSelection(
+                masterData, "BanquetMarriageHall", "Bulk", "Institutional", "Non-Domestic"));
+    }
+
+    @Test
+    void rejectsPropertyTypeThatUsesCategoryNotAllowedByNorm() {
+        Map<String, Object> type = propertyType("School", "COMMERCIAL", "B-1");
+        Map<String, Object> masterData = masterData(type, norm("B-1", "INSTITUTIONAL", Arrays.asList("INSTITUTIONAL")));
+
+        assertThrows(IllegalStateException.class, () -> resolver.resolveDemandNormCodeFromSelection(
+                masterData, "School", "Bulk", "Commercial", "Non-Domestic"));
+    }
+
+    private Map<String, Object> masterData(Map<String, Object> propertyType, Map<String, Object> norm) {
+        Map<String, Object> masterData = new LinkedHashMap<>();
+        masterData.put("PropertyType2", Arrays.asList(propertyType));
+        masterData.put("PropertyCategory", Arrays.asList(
+                category("Residential", "RESIDENTIAL"),
+                category("Commercial", "COMMERCIAL"),
+                category("Institutional", "INSTITUTIONAL"),
+                category("Industrial", "INDUSTRIAL")));
+        masterData.put("WaterDemandNorms2", Arrays.asList(norm));
+        return masterData;
+    }
+
+    private Map<String, Object> propertyType(String code, String propertyCategory, String normCode) {
+        Map<String, Object> entry = new LinkedHashMap<>();
+        entry.put("code", code);
+        entry.put("name", code);
+        entry.put("propertyCategory", titleCase(propertyCategory));
+        entry.put("categoryType", Arrays.asList("Non-Domestic"));
+        entry.put("waterConnectionUsageType", "Bulk");
+        entry.put("demandNormCode", normCode);
+        entry.put("active", true);
+        return entry;
+    }
+
+    private Map<String, Object> norm(String code, String parent, java.util.List<String> parents) {
         Map<String, Object> norm = new LinkedHashMap<>();
         norm.put("subCategoryCode", code);
-        norm.put("name", name);
-        norm.put("parentUsageCode", parentUsageCode);
+        norm.put("name", "Norm " + code);
+        norm.put("parentUsageCode", parent);
+        norm.put("parentUsageCodes", parents);
         norm.put("isActive", true);
         return norm;
     }
 
+    private Map<String, Object> category(String name, String code) {
+        Map<String, Object> category = new LinkedHashMap<>();
+        category.put("name", name);
+        category.put("code", code);
+        category.put("active", true);
+        return category;
+    }
+
+    private String titleCase(String code) {
+        String lower = code.toLowerCase(java.util.Locale.ROOT);
+        return Character.toUpperCase(lower.charAt(0)) + lower.substring(1);
+    }
 }

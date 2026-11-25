@@ -30,136 +30,209 @@ public class UsageCodeResolver {
 
     private static final String WATER_DEMAND_NORMS_V2 = "WaterDemandNorms2";
     private static final String PROPERTY_TYPE_V2 = "PropertyType2";
+    private static final String PROPERTY_CATEGORY_V2 = "PropertyCategory";
 
     private final ObjectMapper mapper;
     private final PropertyContextExtractor contextExtractor;
 
     public String resolveUsageCategoryCode(Property property, Map<String, Object> masterData) {
         if (property == null) {
-            return "UNKNOWN";
+            throw new IllegalArgumentException("Property is required to resolve the revised water-demand norm.");
         }
-
         Map<String, Object> details = contextExtractor.getPropertyAdditionalDetailsMap(property);
-
-        // A persisted code is trusted only when it is present and active in the
-        // revised WaterDemandNorms2 master. This prevents an old code such as
-        // A-4_HIG_MIG from leaking into the new A/B/C calculation path.
-        String explicitCode = firstNonBlank(details, "demandNormCode", "waterDemandNormCode",
-                "subCategoryCode", "waterDemandSubCategoryCode");
-        if (StringUtils.isNotBlank(explicitCode)) {
-            String normalized = normalizeDemandNormCode(explicitCode);
-            if (isActiveWaterDemandNormCode(masterData, normalized)) {
-                log.debug("Using active WaterDemandNorms2 code '{}' for property '{}'",
-                        normalized, property.getPropertyId());
-                return normalized;
-            }
-            log.warn("Ignoring stale/unsupported persisted water-demand code '{}' for property '{}'; "
-                    + "resolving against WaterDemandNorms2 and PropertyType2 instead.",
-                    normalized, property.getPropertyId());
-        }
-
         String propertyCategory = firstNonBlank(details, "propertyCategory", "propertyUsageCategory");
+        String categoryType = firstNonBlank(details, "categoryType");
         String rawUsageType = firstNonBlank(details, "rawUsageType", "usageCategoryDetail", "subUsageCategory");
         String usageCategory = StringUtils.isNotBlank(rawUsageType) ? rawUsageType : property.getUsageCategory();
 
-        String resolved = resolveDemandNormCodeFromSelection(masterData, property.getPropertyType(),
-                usageCategory, propertyCategory);
-        return StringUtils.isBlank(resolved) ? "UNKNOWN" : resolved;
+        // PropertyType2 is the source of truth. Do not let an old persisted
+        // demandNormCode override a newly updated PropertyType2 mapping.
+        return resolveDemandNormCodeFromSelection(masterData, property.getPropertyType(),
+                usageCategory, propertyCategory, categoryType);
+    }
+
+    /** Backward-compatible overload for callers that do not provide CategoryType. */
+    public String resolveDemandNormCodeFromSelection(Map<String, Object> masterData,
+            String propertyTypeCode, String usageCategory, String propertyCategory) {
+        return resolveDemandNormCodeFromSelection(masterData, propertyTypeCode, usageCategory, propertyCategory, null);
     }
 
     /**
-     * Resolve a selected property to the revised WaterDemandNorms2 code.
-     *
-     * Resolution order is deliberately restricted to the revised contract:
-     * 1) an exact active code in WaterDemandNorms2;
-     * 2) explicit demandNormCode/subCategoryCode on PropertyTax.PropertyType2;
-     * 3) a unique norm for PropertyType2.propertyCategory/parentUsageCode.
-     *
-     * The third rule is intentionally allowed only when the parent category has
-     * exactly one active norm (currently Residential -> A). Institutional and
-     * Commercial have multiple subcategories and therefore require explicit
-     * PropertyType2 mappings. Legacy PropertyNewUsageType/PropertyType demand
-     * codes are never consulted for WaterDemandNorms2.
+     * Resolves norm code strictly from the selected active PropertyType2 record,
+     * validates its top-level PropertyCategory against the PropertyCategory master,
+     * and validates that the selected category is allowed by the norm's
+     * parentUsageCodes. This is what allows one canonical B-3 norm to serve both
+     * Commercial and Industrial property records without duplicating B-3.
      */
     public String resolveDemandNormCodeFromSelection(Map<String, Object> masterData,
-            String propertyTypeCode, String usageCategory, String propertyCategory) {
+            String propertyTypeCode, String usageCategory, String propertyCategory, String categoryType) {
         List<Map<String, Object>> activeNorms = getActiveNorms(masterData);
         if (CollectionUtils.isEmpty(activeNorms)) {
             throw new IllegalStateException("WaterDemandNorms2 has no active norm entries. "
-                    + "Configure active revised norms A, B-1..B-4 and C-1..C-4 in MDMS.");
-        }
-
-        // A caller may supply the revised subCategoryCode directly. Only codes
-        // actually configured as active in WaterDemandNorms2 are accepted.
-        for (String candidate : asCandidates(propertyTypeCode, usageCategory)) {
-            String normalizedCandidate = normalizeDemandNormCode(candidate);
-            Map<String, Object> activeNorm = findActiveNorm(activeNorms, normalizedCandidate);
-            if (activeNorm != null) {
-                return configuredNormCode(activeNorm);
-            }
+                    + "Configure active revised norms A-1, B-1..B-4 and C-1..C-4 in MDMS.");
         }
 
         Map<String, Object> propertyTypeEntry = findPropertyType2Entry(masterData, propertyTypeCode);
-        if (propertyTypeEntry == null) {
+        if (propertyTypeEntry == null && StringUtils.isNotBlank(usageCategory)) {
             propertyTypeEntry = findPropertyType2Entry(masterData, usageCategory);
         }
-
-        // Do not infer a norm from a broad category if the selected property type
-        // itself is unknown to PropertyType2. This protects against typo/obsolete
-        // UI codes being silently charged under a plausible parent category.
-        if (propertyTypeEntry == null && StringUtils.isNotBlank(propertyTypeCode)) {
-            return null;
+        if (propertyTypeEntry == null) {
+            throw new IllegalStateException("Selected property type '" + StringUtils.defaultIfBlank(propertyTypeCode, usageCategory)
+                    + "' was not found in the active PropertyTax.PropertyType2 master.");
         }
 
-        String categoryFromMaster = value(propertyTypeEntry, "propertyCategory");
-        if (StringUtils.isNotBlank(propertyCategory) && StringUtils.isNotBlank(categoryFromMaster)
-                && !propertyCategory.trim().equalsIgnoreCase(categoryFromMaster.trim())) {
-            throw new IllegalStateException("Property category mismatch for PropertyType2 code '"
-                    + value(propertyTypeEntry, "code") + "': request supplied '" + propertyCategory
-                    + "' but MDMS PropertyType2 specifies '" + categoryFromMaster + "'.");
+        String categoryCode = validatePropertyCategory(masterData, propertyTypeEntry, propertyCategory);
+        validateCategoryType(propertyTypeEntry, categoryType);
+
+        String configuredCode = getConfiguredNormCode(propertyTypeEntry);
+        if (StringUtils.isBlank(configuredCode)) {
+            throw new IllegalStateException("PropertyType2 entry '" + value(propertyTypeEntry, "code")
+                    + "' is missing demandNormCode. Every active selectable property type must map to one revised norm.");
         }
+        Map<String, Object> matchedNorm = findActiveNorm(activeNorms, configuredCode);
+        if (matchedNorm == null) {
+            throw new IllegalStateException("PropertyType2 entry '" + value(propertyTypeEntry, "code")
+                    + "' maps to unsupported WaterDemandNorms2 code '" + configuredCode + "'.");
+        }
+        validateNormParentCategory(matchedNorm, categoryCode, propertyTypeEntry);
 
-        if (propertyTypeEntry != null) {
-            String configuredCode = getConfiguredNormCode(propertyTypeEntry);
-            if (StringUtils.isNotBlank(configuredCode)) {
-                return validateConfiguredNormCode(configuredCode, propertyTypeEntry, activeNorms);
-            }
-
-            // PropertyType2.infrastructureCategory (for example, "Category B1")
-            // is the older infrastructure/IFC classification, not a dependable
-            // one-to-one mapping to the revised water-demand subcategories. Instead,
-            // use the selected property's display name only when it appears as a
-            // complete, unambiguous phrase in exactly one active WaterDemandNorms2
-            // label. E.g. "Destitute Home" uniquely matches B-1's "Destitute Homes".
-            // Ambiguous labels such as "Hotel" still require explicit MDMS mapping.
-            String normFromLabel = resolveUniqueNormByPropertyLabel(activeNorms,
-                    value(propertyTypeEntry, "name"));
-            if (StringUtils.isNotBlank(normFromLabel)) {
-                log.debug("Resolved property type '{}' to WaterDemandNorms2 code '{}' by unique norm label match",
-                        value(propertyTypeEntry, "code"), normFromLabel);
-                return normFromLabel;
+        String normCode = configuredNormCode(matchedNorm);
+        if ("B-2".equalsIgnoreCase(normCode)) {
+            String useClass = value(propertyTypeEntry, "demandNormSubType");
+            if (!"MERCANTILE".equalsIgnoreCase(useClass) && !"ASSEMBLY".equalsIgnoreCase(useClass)) {
+                throw new IllegalStateException("PropertyType2 entry '" + value(propertyTypeEntry, "code")
+                        + "' uses B-2 but has no valid demandNormSubType. Set MERCANTILE or ASSEMBLY in MDMS.");
             }
         }
+        return normCode;
+    }
 
-        String effectiveCategory = StringUtils.isNotBlank(categoryFromMaster)
-                ? categoryFromMaster : propertyCategory;
-        if (StringUtils.isNotBlank(effectiveCategory)) {
-            List<Map<String, Object>> categoryNorms = findNormsForParentCategory(activeNorms, effectiveCategory);
-            if (categoryNorms.size() == 1) {
-                return configuredNormCode(categoryNorms.get(0));
-            }
-            if (categoryNorms.size() > 1) {
-                List<String> codes = new ArrayList<>();
-                for (Map<String, Object> norm : categoryNorms) {
-                    codes.add(configuredNormCode(norm));
-                }
-                throw new IllegalStateException("Property type '" + StringUtils.defaultIfBlank(propertyTypeCode, usageCategory)
-                        + "' belongs to category '" + effectiveCategory + "', which matches multiple revised norms "
-                        + codes + ". Configure an explicit demandNormCode on its active PropertyType2 MDMS entry.");
+    /** Returns the B-2 IFC use class configured for the selected property type. */
+    public String resolveDemandNormSubType(Map<String, Object> masterData, String propertyTypeCode) {
+        Map<String, Object> entry = findPropertyType2Entry(masterData, propertyTypeCode);
+        return entry == null ? null : value(entry, "demandNormSubType");
+    }
+
+    /** Returns the per-property IFC override, for example ZERO for DDA Flat. */
+    public String resolvePropertyIfcOverride(Map<String, Object> masterData, String propertyTypeCode) {
+        Map<String, Object> entry = findPropertyType2Entry(masterData, propertyTypeCode);
+        return entry == null ? null : value(entry, "ifcOverride");
+    }
+
+    /** Returns the active PropertyType2 record for downstream audit/validation. */
+    public Map<String, Object> findPropertyType2Record(Map<String, Object> masterData, String propertyTypeCode) {
+        return findPropertyType2Entry(masterData, propertyTypeCode);
+    }
+
+    private String validatePropertyCategory(Map<String, Object> masterData,
+            Map<String, Object> propertyTypeEntry, String requestedPropertyCategory) {
+        List<Map<String, Object>> categories = toMapList(masterData == null ? null : masterData.get(PROPERTY_CATEGORY_V2));
+        if (CollectionUtils.isEmpty(categories)) {
+            throw new IllegalStateException("PropertyCategory MDMS master is missing or empty. "
+                    + "Fetch PropertyTax.PropertyCategory along with PropertyType2 and WaterDemandNorms2.");
+        }
+        // The DJB property form has exactly these four top-level categories.
+        // Fail fast if the master deployment is incomplete rather than accepting
+        // a partial dropdown configuration and resolving norms inconsistently.
+        String[] requiredCategoryCodes = { "RESIDENTIAL", "COMMERCIAL", "INSTITUTIONAL", "INDUSTRIAL" };
+        for (String requiredCode : requiredCategoryCodes) {
+            if (findActivePropertyCategory(categories, requiredCode) == null) {
+                throw new IllegalStateException("PropertyTax.PropertyCategory is missing active category code '"
+                        + requiredCode + "'. Expected Residential, Commercial, Institutional and Industrial.");
             }
         }
 
+        String configuredCategory = value(propertyTypeEntry, "propertyCategory");
+        if (StringUtils.isBlank(configuredCategory)) {
+            throw new IllegalStateException("PropertyType2 entry '" + value(propertyTypeEntry, "code")
+                    + "' has no propertyCategory.");
+        }
+        Map<String, Object> configuredMasterCategory = findActivePropertyCategory(categories, configuredCategory);
+        if (configuredMasterCategory == null) {
+            throw new IllegalStateException("PropertyType2 entry '" + value(propertyTypeEntry, "code")
+                    + "' refers to unknown/inactive PropertyCategory '" + configuredCategory + "'.");
+        }
+        String configuredCode = value(configuredMasterCategory, "code");
+        if (StringUtils.isBlank(configuredCode)) {
+            throw new IllegalStateException("PropertyCategory entry for '" + configuredCategory + "' has no code.");
+        }
+
+        if (StringUtils.isNotBlank(requestedPropertyCategory)) {
+            Map<String, Object> requestedMasterCategory = findActivePropertyCategory(categories, requestedPropertyCategory);
+            if (requestedMasterCategory == null) {
+                throw new IllegalStateException("Selected PropertyCategory '" + requestedPropertyCategory
+                        + "' is not present/active in PropertyTax.PropertyCategory MDMS.");
+            }
+            String requestedCode = value(requestedMasterCategory, "code");
+            if (!configuredCode.equalsIgnoreCase(requestedCode)) {
+                throw new IllegalStateException("Property category mismatch for PropertyType2 code '"
+                        + value(propertyTypeEntry, "code") + "': request supplied '" + requestedPropertyCategory
+                        + "' but MDMS PropertyType2 specifies '" + configuredCategory + "'.");
+            }
+        }
+        return configuredCode.trim().toUpperCase(Locale.ROOT);
+    }
+
+    private Map<String, Object> findActivePropertyCategory(List<Map<String, Object>> categories, String candidate) {
+        for (Map<String, Object> category : categories) {
+            if (category == null || !isActive(category, "active")) {
+                continue;
+            }
+            if (equalsAnyIgnoreCase(candidate, value(category, "name"), value(category, "code"))) {
+                return category;
+            }
+        }
         return null;
+    }
+
+    private void validateCategoryType(Map<String, Object> propertyTypeEntry, String selectedCategoryType) {
+        if (StringUtils.isBlank(selectedCategoryType)) {
+            return;
+        }
+        Object configured = propertyTypeEntry.get("categoryType");
+        List<String> allowed = new ArrayList<>();
+        if (configured instanceof List || configured instanceof JSONArray) {
+            List<Object> values = mapper.convertValue(configured, new TypeReference<List<Object>>() { });
+            for (Object item : values) {
+                if (item != null) allowed.add(item.toString().trim());
+            }
+        } else if (configured != null) {
+            allowed.add(configured.toString().trim());
+        }
+        String selectedNormalized = normalizeCategoryType(selectedCategoryType);
+        for (String candidate : allowed) {
+            if (normalizeCategoryType(candidate).equals(selectedNormalized)) {
+                return;
+            }
+        }
+        throw new IllegalStateException("Selected categoryType '" + selectedCategoryType
+                + "' is not allowed for PropertyType2 code '" + value(propertyTypeEntry, "code")
+                + "'. Allowed values: " + allowed);
+    }
+
+    private String normalizeCategoryType(String value) {
+        return value == null ? "" : value.replaceAll("[^A-Za-z]", "").toUpperCase(Locale.ROOT);
+    }
+
+    private void validateNormParentCategory(Map<String, Object> norm, String selectedCategoryCode,
+            Map<String, Object> propertyTypeEntry) {
+        List<String> allowed = new ArrayList<>();
+        Object configuredParents = norm.get("parentUsageCodes");
+        if (configuredParents instanceof List || configuredParents instanceof JSONArray) {
+            List<Object> values = mapper.convertValue(configuredParents, new TypeReference<List<Object>>() { });
+            for (Object value : values) {
+                if (value != null) allowed.add(value.toString().trim().toUpperCase(Locale.ROOT));
+            }
+        }
+        String primaryParent = value(norm, "parentUsageCode");
+        if (StringUtils.isNotBlank(primaryParent) && !allowed.contains(primaryParent.toUpperCase(Locale.ROOT))) {
+            allowed.add(primaryParent.toUpperCase(Locale.ROOT));
+        }
+        if (!allowed.contains(selectedCategoryCode.toUpperCase(Locale.ROOT))) {
+            throw new IllegalStateException("PropertyType2 code '" + value(propertyTypeEntry, "code")
+                    + "' belongs to PropertyCategory '" + selectedCategoryCode + "' but WaterDemandNorms2 code '"
+                    + configuredNormCode(norm) + "' allows parentUsageCodes " + allowed + ".");
+        }
     }
 
     /** Returns true only for a code present and active in WaterDemandNorms2. */
@@ -218,7 +291,7 @@ public class UsageCodeResolver {
         if (matched == null) {
             throw new IllegalStateException("PropertyType2 MDMS entry '" + value(propertyTypeEntry, "code")
                     + "' maps to unsupported WaterDemandNorms2 code '" + code + "'. "
-                    + "Use a configured active revised subCategoryCode: A, B-1..B-4 or C-1..C-4; "
+                    + "Use a configured active revised subCategoryCode: A-1, B-1..B-4 or C-1..C-4; "
                     + "legacy codes such as A-4_HIG_MIG are not valid.");
         }
         return configuredNormCode(matched);

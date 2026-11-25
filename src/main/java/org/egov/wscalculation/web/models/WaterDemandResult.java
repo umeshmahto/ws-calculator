@@ -27,12 +27,14 @@ public class WaterDemandResult {
     private BigDecimal standardTotalLpcd;
     private BigDecimal potableLpcd;
     private BigDecimal nonPotableLpcd;
+    private BigDecimal opdPotableDemand;
     private Boolean potableThresholdApplied;
 
     private String matchedNormCode;
     private String matchedNormName;
     private String formulaUsed;
     private String calculationBasisApplied;
+    private String ifcOverrideReason;
     private Map<String, BigDecimal> contextVariables;
 	
     

@@ -47,8 +47,16 @@ public abstract class AbstractWaterDemandGroupStrategy implements GroupDemandStr
         }
 
         validateRequiredInputs(normCode, context);
+        if ("C-4".equals(normCode)) {
+            validateC4FacilityPlotAreaRule(matchedNorm, context);
+        }
 
         String occupancyFormula = asString(matchedNorm.get("minOccupancyFormula"));
+        // C-4 minimum bed count differs by facility type in the revised DJB sheet:
+        // Hospital = 1 bed / 80 sqm; Nursing Home = 1 bed / 60 sqm.
+        if ("C-4".equals(normCode)) {
+            occupancyFormula = "MAX(sanctioned_beds, minimum_beds_by_area)";
+        }
         if (StringUtils.isBlank(occupancyFormula)) {
             throw new IllegalStateException("minOccupancyFormula is required for WaterDemandNorms2 code " + normCode);
         }
@@ -65,6 +73,12 @@ public abstract class AbstractWaterDemandGroupStrategy implements GroupDemandStr
                     + normCode + ". Verify the required property inputs.");
         }
 
+        // C-4's LPCD changes at 100 effective beds. Feed the calculated
+        // (sanctioned-vs-area minimum) bed count into the MDMS formula so that
+        // the rates remain configuration-driven rather than hard-coded here.
+        if ("C-4".equals(normCode)) {
+            context.put("effective_beds", occupancy);
+        }
         BigDecimal totalLpcd = configuredRate(matchedNorm, "totalLpcd", "totalLpcdFormula", context);
         BigDecimal potableLpcd = configuredRate(matchedNorm, "potableLpcd", "potableLpcdFormula", context);
         BigDecimal nonPotableLpcd = configuredRate(matchedNorm, "nonPotableLpcd", "nonPotableLpcdFormula", context);
@@ -83,29 +97,47 @@ public abstract class AbstractWaterDemandGroupStrategy implements GroupDemandStr
             throw new IllegalStateException("contingencyPercentage cannot be negative for norm " + normCode);
         }
 
-        String ifcBasis = asString(matchedNorm.get("ifcCalculationBasis"));
-        String expectedBasis = expectedIfcCalculationBasis();
+        String ifcBasis = resolveIfcBasis(matchedNorm, normCode, context);
         if (StringUtils.isBlank(ifcBasis)) {
             throw new IllegalStateException("ifcCalculationBasis is required for WaterDemandNorms2 code " + normCode);
-        }
-        if (!expectedBasis.equalsIgnoreCase(ifcBasis)) {
-            throw new IllegalStateException("Invalid ifcCalculationBasis '" + ifcBasis + "' for norm " + normCode
-                    + ". Expected '" + expectedBasis + "' according to the revised DJB norms.");
         }
 
         BigDecimal contingencyMultiplier = BigDecimal.ONE.add(
                 contingencyPercentage.divide(HUNDRED, 8, RoundingMode.HALF_UP));
-        BigDecimal totalDemandBeforeIfcBasis = occupancy.multiply(totalLpcd).multiply(contingencyMultiplier);
+        // The revised norms define the 12,500 LPD condition against total calculated
+        // water demand. Include configured floating/contingency demand in the total
+        // used for threshold selection, then apply the same contingency multiplier
+        // to whichever IFC basis (total or potable) is selected.
+        BigDecimal ifcThresholdLpd = configuredNumber(matchedNorm, "ifcThresholdLpd", IFC_POTABLE_THRESHOLD_LPD);
+        if (ifcThresholdLpd.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new IllegalStateException("ifcThresholdLpd must be positive for norm " + normCode);
+        }
+        BigDecimal opdPotableDemand = BigDecimal.ZERO;
+        if ("C-4".equals(normCode)) {
+            // OPD occupancy is the higher of 1 person per 1.5 sqm of OPD area
+            // or 20 persons per bed. OPD demand is 15 LPCD potable.
+            BigDecimal opdByArea = value(context, "opd_area")
+                    .divide(new BigDecimal("1.5"), 8, RoundingMode.CEILING);
+            BigDecimal opdByBeds = occupancy.multiply(new BigDecimal("20"));
+            opdPotableDemand = opdByArea.max(opdByBeds).multiply(new BigDecimal("15"));
+        }
+
+        BigDecimal totalDemandBeforeIfcBasis = occupancy.multiply(totalLpcd).add(opdPotableDemand);
+        BigDecimal potableDemandBeforeIfcBasis = occupancy.multiply(potableLpcd).add(opdPotableDemand);
 
         BigDecimal chosenLpcd = totalLpcd;
         boolean potableThresholdApplied = false;
+        BigDecimal baseDemand = totalDemandBeforeIfcBasis;
+        BigDecimal totalDemandForThreshold = totalDemandBeforeIfcBasis.multiply(contingencyMultiplier);
         if ("POTABLE_ONLY_IF_OVER_12500".equalsIgnoreCase(ifcBasis)
-                && totalDemandBeforeIfcBasis.compareTo(IFC_POTABLE_THRESHOLD_LPD) > 0) {
+                && totalDemandForThreshold.compareTo(ifcThresholdLpd) > 0) {
             chosenLpcd = potableLpcd;
             potableThresholdApplied = true;
+            baseDemand = potableDemandBeforeIfcBasis;
+        } else if ("TOTAL_WATER_ALWAYS".equalsIgnoreCase(ifcBasis)) {
+            baseDemand = totalDemandBeforeIfcBasis;
         }
 
-        BigDecimal baseDemand = occupancy.multiply(chosenLpcd);
         BigDecimal ifcDemand = baseDemand.multiply(contingencyMultiplier)
                 .setScale(WSCalculationConstant.RESULT_SCALE, RoundingMode.HALF_UP);
 
@@ -123,6 +155,7 @@ public abstract class AbstractWaterDemandGroupStrategy implements GroupDemandStr
         result.setStandardTotalLpcd(totalLpcd);
         result.setPotableLpcd(potableLpcd);
         result.setNonPotableLpcd(nonPotableLpcd);
+        result.setOpdPotableDemand(opdPotableDemand);
         result.setPotableThresholdApplied(potableThresholdApplied);
 
         log.info("Revised water-demand strategy applied: strategy={}, normCode={}, occupancy={}, formula={}, "
@@ -132,9 +165,52 @@ public abstract class AbstractWaterDemandGroupStrategy implements GroupDemandStr
                 nonPotableLpcd, totalDemandBeforeIfcBasis, ifcBasis, potableThresholdApplied, ifcDemand);
     }
 
+    @SuppressWarnings("unchecked")
+    private String resolveIfcBasis(Map<String, Object> norm, String normCode, Map<String, BigDecimal> context) {
+        Object byUseClass = norm.get("ifcCalculationBasisByUseClass");
+        if (byUseClass instanceof Map) {
+            Map<String, Object> rules = (Map<String, Object>) byUseClass;
+            String useClass = value(context, "is_assembly_use").compareTo(BigDecimal.ZERO) > 0
+                    ? "ASSEMBLY" : "MERCANTILE";
+            Object configured = rules.get(useClass);
+            if (configured == null) {
+                throw new IllegalStateException("Missing ifcCalculationBasisByUseClass rule '" + useClass
+                        + "' for norm " + normCode + ".");
+            }
+            return configured.toString().trim();
+        }
+        String configured = asString(norm.get("ifcCalculationBasis"));
+        if (StringUtils.isBlank(configured) || "CONDITIONAL_BY_USE_CLASS".equalsIgnoreCase(configured)) {
+            throw new IllegalStateException("Norm " + normCode
+                    + " requires ifcCalculationBasisByUseClass configuration for conditional IFC rules.");
+        }
+        return configured;
+    }
+
+    @SuppressWarnings("unchecked")
+    private void validateC4FacilityPlotAreaRule(Map<String, Object> norm, Map<String, BigDecimal> context) {
+        Object rawRules = norm.get("facilityPlotAreaRules");
+        if (!(rawRules instanceof Map)) {
+            throw new IllegalStateException("C-4 facilityPlotAreaRules must be configured in WaterDemandNorms2.");
+        }
+        Map<String, Object> rules = (Map<String, Object>) rawRules;
+        String facilityType = value(context, "is_hospital_property").compareTo(BigDecimal.ZERO) > 0
+                ? "HOSPITAL" : "NURSING_HOME";
+        Object rawRule = rules.get(facilityType);
+        if (rawRule == null || StringUtils.isBlank(rawRule.toString())) {
+            throw new IllegalStateException("C-4 plot-area applicability rule is missing for " + facilityType + ".");
+        }
+        String condition = rawRule.toString().trim();
+        BigDecimal applicable = expressionEvaluator.evaluateExpression("IF(" + condition + ", 1, 0)", context);
+        if (applicable.compareTo(BigDecimal.ONE) != 0) {
+            throw new IllegalStateException("C-4 " + facilityType + " is not applicable for plot area "
+                    + value(context, "plot_area") + " sqm. Applicable rule from MDMS: " + condition);
+        }
+    }
+
     private void validateRequiredInputs(String normCode, Map<String, BigDecimal> context) {
         switch (normCode) {
-            case "A":
+            case "A-1":
                 requirePositiveInput(context, "total_du", normCode);
                 break;
             case "B-1":
@@ -164,10 +240,12 @@ public abstract class AbstractWaterDemandGroupStrategy implements GroupDemandStr
                 break;
             case "C-4":
                 requirePositiveInput(context, "sanctioned_beds", normCode);
+                requirePositiveInput(context, "built_up_area", normCode);
+                requirePositiveInput(context, "plot_area", normCode);
                 break;
             default:
                 throw new IllegalStateException("Unsupported revised WaterDemandNorms2 code '" + normCode + "'. "
-                        + "Only A, B-1..B-4 and C-1..C-4 are supported.");
+                        + "Only A-1, B-1..B-4 and C-1..C-4 are supported.");
         }
     }
 

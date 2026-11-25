@@ -30,7 +30,7 @@ public class WaterDemandStrategyFactory {
 
         throw new IllegalStateException("No water-demand strategy supports norm code '" + subCategoryCode
                 + "' and parentUsageCode '" + parentUsageCode
-                + "'. Supported revised norms are A, B-1..B-4 and C-1..C-4. "
+                + "'. Supported revised norms are A-1, B-1..B-4 and C-1..C-4. "
                 + "Remove legacy Group D-J norm entries and correct the MDMS parentUsageCode mapping.");
     }
 }
