@@ -308,7 +308,6 @@ public class CalculatorUtil {
 	    List<MasterDetail> propertyMasters = new ArrayList<>();
 	    propertyMasters.add(MasterDetail.builder().name(WSCalculationConstant.WC_PROPERTY_TYPE_MASTER).filter("[?(@.active==true)]").build());
 	    propertyMasters.add(MasterDetail.builder().name("PropertyType2").filter("[?(@.active==true)]").build());
-	    // Validate top-level Residential/Commercial/Institutional/Industrial category selections.
 	    propertyMasters.add(MasterDetail.builder().name("PropertyCategory").filter("[?(@.active==true)]").build());
 	    propertyMasters.add(MasterDetail.builder().name(WSCalculationConstant.WC_PROPERTY_NEW_USAGE_TYPE_MASTER).filter("[?(@.active==true)]").build());
 	    

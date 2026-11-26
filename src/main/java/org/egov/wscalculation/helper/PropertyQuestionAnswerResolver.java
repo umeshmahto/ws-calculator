@@ -49,7 +49,20 @@ public final class PropertyQuestionAnswerResolver {
         if (questionCode == null || questionCode.trim().isEmpty()) {
             return null;
         }
-        return extractAnswers(additionalDetails).get(normalizeCode(questionCode));
+        String normalizedCode = normalizeCode(questionCode);
+        String questionAnswer = extractAnswers(additionalDetails).get(normalizedCode);
+        if (questionAnswer != null || additionalDetails == null
+                || !normalizeCode(PREMISES_HAS_RESIDENTIAL_UNITS).equals(normalizedCode)) {
+            return questionAnswer;
+        }
+
+        Object suppliedCode = additionalDetails.get("categoryTypeSelectionQuestionCode");
+        if (suppliedCode != null && !normalizedCode.equals(normalizeCode(suppliedCode.toString()))) {
+            throw new IllegalArgumentException("categoryTypeSelectionQuestionCode does not match configured questionCode '"
+                    + questionCode + "'.");
+        }
+        Object suppliedAnswer = additionalDetails.get("categoryTypeSelectionAnswer");
+        return suppliedAnswer == null ? null : suppliedAnswer.toString().trim();
     }
 
     /** Returns a numeric answer for a stable questionCode, or null when absent. */

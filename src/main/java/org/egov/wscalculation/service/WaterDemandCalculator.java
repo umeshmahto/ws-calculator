@@ -143,10 +143,11 @@ public class WaterDemandCalculator {
 
         Map<String, BigDecimal> context = contextExtractor.extractContextVariablesForNormsV2(property);
 
-        // C-4 facility-specific bed density is selected from explicit PropertyType2
-        // metadata. Inferring Hospital/Nursing Home from a display label is unsafe.
+        // C-4 occupancy is based only on the supplied Number of Beds. The explicit
+        // facilityType is retained solely to select the Hospital/Nursing Home
+        // plot-area applicability rule; built-up area does not derive bed occupancy.
         if ("C-4".equalsIgnoreCase(usageCode)) {
-            configureC4FacilityContext(propertyTypeEntry, matchedNorm, context);
+            configureC4FacilityContext(propertyTypeEntry, context);
         }
 
         // B-2 has two IFC calculation bases, but both use the same Commercial
@@ -171,9 +172,8 @@ public class WaterDemandCalculator {
         return result;
     }
 
-    @SuppressWarnings("unchecked")
     private void configureC4FacilityContext(Map<String, Object> propertyTypeEntry,
-            Map<String, Object> matchedNorm, Map<String, BigDecimal> context) {
+            Map<String, BigDecimal> context) {
         Object rawFacilityType = propertyTypeEntry.get("facilityType");
         String facilityType = rawFacilityType == null ? ""
                 : rawFacilityType.toString().trim().toUpperCase(java.util.Locale.ROOT);
@@ -182,20 +182,9 @@ public class WaterDemandCalculator {
                     + "' must configure facilityType as HOSPITAL or NURSING_HOME. Do not infer it from the display name.");
         }
 
-        Object rawMinimumFormulas = matchedNorm.get("minimumBedCountFormulaByFacilityType");
-        if (!(rawMinimumFormulas instanceof Map<?, ?>)) {
-            throw new IllegalStateException("C-4 WaterDemandNorms2 must configure minimumBedCountFormulaByFacilityType.");
-        }
-        Map<String, Object> minimumFormulas = (Map<String, Object>) rawMinimumFormulas;
-        Object rawFormula = minimumFormulas.get(facilityType);
-        if (rawFormula == null || rawFormula.toString().trim().isEmpty()) {
-            throw new IllegalStateException("C-4 minimum bed formula is missing for facilityType '" + facilityType + "'.");
-        }
-
-        BigDecimal minimumBeds = expressionEvaluator.evaluateExpression(rawFormula.toString(), context);
+        // Facility type is used only for the independent plot-area applicability
+        // check. The C-4 bed occupancy comes exclusively from sanctioned_beds.
         context.put("is_hospital_property", "HOSPITAL".equals(facilityType) ? BigDecimal.ONE : BigDecimal.ZERO);
-        context.put("minimum_beds_by_area", minimumBeds);
-        context.put("minimum_beds_from_built_up_area", minimumBeds);
     }
 
     /**

@@ -117,6 +117,37 @@ class PropertyQuestionAnswerResolverTest {
     }
 
     @Test
+    void categorySelectionAcceptsDedicatedSiblingAnswerWhenQuestionListIsNotSent() {
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("categoryTypeSelectionQuestionCode", "PREMISES_HAS_RESIDENTIAL_UNITS");
+        details.put("categoryTypeSelectionAnswer", "NO");
+        Map<String, Object> rule = new LinkedHashMap<>();
+        rule.put("questionCode", "PREMISES_HAS_RESIDENTIAL_UNITS");
+        rule.put("rules", Arrays.asList(rule("YES", "Domestic"), rule("NO", "Non-Domestic")));
+        Map<String, Object> propertyType = new LinkedHashMap<>();
+        propertyType.put("code", "StationaryShop");
+        propertyType.put("categoryTypeSelectionRule", rule);
+
+        PropertyQuestionAnswerResolver.validateCategoryTypeSelection(details, propertyType, "Non-Domestic");
+    }
+
+    @Test
+    void rejectsMismatchedConditionalQuestionCodeInSiblingPayload() {
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("categoryTypeSelectionQuestionCode", "SOME_OTHER_QUESTION");
+        details.put("categoryTypeSelectionAnswer", "NO");
+        Map<String, Object> rule = new LinkedHashMap<>();
+        rule.put("questionCode", "PREMISES_HAS_RESIDENTIAL_UNITS");
+        rule.put("rules", Arrays.asList(rule("YES", "Domestic"), rule("NO", "Non-Domestic")));
+        Map<String, Object> propertyType = new LinkedHashMap<>();
+        propertyType.put("code", "StationaryShop");
+        propertyType.put("categoryTypeSelectionRule", rule);
+
+        assertThrows(IllegalArgumentException.class,
+                () -> PropertyQuestionAnswerResolver.validateCategoryTypeSelection(details, propertyType, "Non-Domestic"));
+    }
+
+    @Test
     void categorySelectionIsResolvedByQuestionCodeAndAnswer() {
         Map<String, Object> details = details(question("PREMISES_HAS_RESIDENTIAL_UNITS", "NO"));
         details.put("categoryType", "Non-Domestic");

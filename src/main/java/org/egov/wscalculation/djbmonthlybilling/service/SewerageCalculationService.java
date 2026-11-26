@@ -130,13 +130,19 @@ public class SewerageCalculationService {
 		}
 
 		if ("BASE_PLUS_PER_BLOCK".equals(type)) {
-			Integer count = context.getNumberOfRooms() != null ? context.getNumberOfRooms() : context.getNumberOfBeds();
+			Integer count = resolveRuleOccupancyCount(rule, context);
 
 			if (count == null) {
-				throw new IllegalArgumentException("Rooms/beds are required for block-based additional sewerage");
+				throw new IllegalArgumentException("Rooms/beds are required for block-based additional sewerage rule '"
+						+ rule.getCode() + "'.");
 			}
 
-			Integer start = rule.getFromRooms() != null ? rule.getFromRooms() : rule.getFromBeds();
+			Integer startValue = rule.getFromRooms() != null ? rule.getFromRooms() : rule.getFromBeds();
+			if (startValue == null || startValue < 1) {
+				throw new IllegalArgumentException("A positive fromRooms/fromBeds threshold is required for block-based additional sewerage rule '"
+						+ rule.getCode() + "'.");
+			}
+			int start = startValue;
 
 			int blockSize = rule.getBlockSize() == null || rule.getBlockSize() <= 0 ? 50 : rule.getBlockSize();
 
@@ -154,20 +160,38 @@ public class SewerageCalculationService {
 
 	private boolean rangeMatches(DJBAdditionalSewerageCharge rule, SewerageCalculationContext context) {
 
-		Integer count = context.getNumberOfRooms() != null ? context.getNumberOfRooms() : context.getNumberOfBeds();
+		Integer count = resolveRuleOccupancyCount(rule, context);
 
 		if (count == null) {
-			return rule.getFromRooms() == null && rule.getFromBeds() == null;
+			boolean rangeConfigured = rule.getFromRooms() != null || rule.getToRooms() != null
+					|| rule.getFromBeds() != null || rule.getToBeds() != null;
+			if (rangeConfigured) {
+				throw new IllegalArgumentException("Rooms/beds are required to evaluate additional sewerage range rule '"
+						+ rule.getCode() + "'.");
+			}
+			return true;
 		}
 
 		Integer from = rule.getFromRooms() != null ? rule.getFromRooms() : rule.getFromBeds();
-
 		Integer to = rule.getToRooms() != null ? rule.getToRooms() : rule.getToBeds();
 
 		if (from != null && count < from) {
 			return false;
 		}
 		return to == null || count <= to;
+	}
+
+	private Integer resolveRuleOccupancyCount(DJBAdditionalSewerageCharge rule,
+			SewerageCalculationContext context) {
+		boolean roomBased = rule.getFromRooms() != null || rule.getToRooms() != null;
+		boolean bedBased = rule.getFromBeds() != null || rule.getToBeds() != null;
+		if (roomBased && bedBased) {
+			throw new IllegalStateException("Additional sewerage rule '" + rule.getCode()
+					+ "' cannot define both room and bed ranges.");
+		}
+		if (roomBased) return context.getNumberOfRooms();
+		if (bedBased) return context.getNumberOfBeds();
+		return context.getNumberOfRooms() != null ? context.getNumberOfRooms() : context.getNumberOfBeds();
 	}
 
 	private boolean withinArea(DJBMonthlySewerageRule rule, BigDecimal area) {

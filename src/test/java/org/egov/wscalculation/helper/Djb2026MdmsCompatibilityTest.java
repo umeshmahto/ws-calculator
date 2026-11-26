@@ -38,7 +38,7 @@ class Djb2026MdmsCompatibilityTest {
         assertTrue(propertyTaxMasters.contains("PropertyType2"),
                 "PropertyType2 must be requested from PropertyTax MDMS module");
         assertTrue(propertyTaxMasters.contains("PropertyCategory"),
-                "PropertyCategory must be requested from PropertyTax MDMS module");
+                "The deployed four-category PropertyCategory master must be requested from PropertyTax MDMS module");
     }
 
     @Test

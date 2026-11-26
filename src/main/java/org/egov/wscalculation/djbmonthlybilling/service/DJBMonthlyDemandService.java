@@ -216,7 +216,9 @@ public class DJBMonthlyDemandService {
 						"hasSewerConnection", "sewerageConnected"))
 				.additionalWaterSource(isAdditionalWaterSource(connection))
 				.consumerCategory(category).propertyUsage(property.getUsageCategory())
-				.builtUpAreaSqm(resolveBuiltUpAreaSqm(property)).build();
+				.builtUpAreaSqm(resolveBuiltUpAreaSqm(property))
+				.numberOfRooms(readQuestionCount(property, PropertyQuestionAnswerResolver.NUMBER_OF_ROOMS))
+				.numberOfBeds(readQuestionCount(property, PropertyQuestionAnswerResolver.NUMBER_OF_BEDS)).build();
 
 		List<DJBMonthlySewerageRule> sewerageRules = masterProvider.getSewerageRules(requestInfo, tenantId);
 
@@ -755,10 +757,21 @@ public class DJBMonthlyDemandService {
 		throw new IllegalArgumentException("Invalid boolean sewer-connection flag: " + normalized);
 	}
 
-	/**
-	 * DJB dwelling-unit rebate uses the same questionCode answer as A-1 water
-	 * demand. Deprecated sibling fields are intentionally not consulted.
-	 */
+	/** Reads occupancy counts from the same stable questionCode contract used by IFC. */
+	private Integer readQuestionCount(Property property, String questionCode) {
+		Map<String, Object> propertyDetails = toMap(property == null ? null : property.getAdditionalDetails());
+		BigDecimal answer = PropertyQuestionAnswerResolver.getNumericAnswer(propertyDetails, questionCode);
+		if (answer == null) {
+			return null;
+		}
+		try {
+			return answer.intValueExact();
+		} catch (ArithmeticException ex) {
+			throw new IllegalArgumentException("Question answer for " + questionCode
+					+ " must be a whole number.", ex);
+		}
+	}
+
 	private Integer readDwellingUnitCountFromQuestion(Property property) {
 		Map<String, Object> propertyDetails = toMap(property == null ? null : property.getAdditionalDetails());
 		BigDecimal answer = PropertyQuestionAnswerResolver.getNumericAnswer(propertyDetails,

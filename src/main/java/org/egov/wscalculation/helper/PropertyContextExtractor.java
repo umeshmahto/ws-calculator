@@ -159,16 +159,35 @@ public class PropertyContextExtractor {
         // Revised DJB C-4 and B-2 use-class inputs. The property type itself is
         // already selected in the common property form; these are derived flags,
         // not additional citizen questions.
-        // OPD area is a form answer and must be read through its stable questionCode,
-        // not from a parallel additionalDetails.opdArea field.
-        BigDecimal opdArea = questionAnswers.getOrDefault("opd_area", BigDecimal.ZERO);
+        boolean opdAreaProvided = questionAnswers.containsKey("opd_area")
+                || (details.containsKey("opdArea") && details.get("opdArea") != null)
+                || (details.containsKey("opd_area") && details.get("opd_area") != null);
+        BigDecimal questionOpdArea = questionAnswers.get("opd_area");
+        BigDecimal detailOpdArea = null;
+        Object rawOpdArea = details.containsKey("opdArea") ? details.get("opdArea") : details.get("opd_area");
+        if (rawOpdArea != null) {
+            try {
+                detailOpdArea = new BigDecimal(rawOpdArea.toString().trim());
+            } catch (NumberFormatException ex) {
+                throw new IllegalArgumentException("additionalDetails.opdArea must be numeric; received '"
+                        + rawOpdArea + "'.", ex);
+            }
+            if (detailOpdArea.compareTo(BigDecimal.ZERO) < 0) {
+                throw new IllegalArgumentException("additionalDetails.opdArea cannot be negative.");
+            }
+        }
+        if (questionOpdArea != null && detailOpdArea != null
+                && questionOpdArea.compareTo(detailOpdArea) != 0) {
+            throw new IllegalArgumentException("Conflicting OPD area values were supplied in questions[opdArea] and additionalDetails.opdArea.");
+        }
+        BigDecimal opdArea = questionOpdArea != null ? questionOpdArea
+                : (detailOpdArea == null ? BigDecimal.ZERO : detailOpdArea);
         vars.put("opd_area", opdArea);
+        vars.put("opd_area_provided", opdAreaProvided ? BigDecimal.ONE : BigDecimal.ZERO);
         // These classification flags are populated from PropertyType2 MDMS by
         // WaterDemandCalculator; do not infer facility/use classes from labels.
         vars.put("is_assembly_use", BigDecimal.ZERO);
         vars.put("is_hospital_property", BigDecimal.ZERO);
-        vars.put("minimum_beds_by_area", BigDecimal.ZERO);
-        vars.put("minimum_beds_from_built_up_area", BigDecimal.ZERO);
 
         return vars;
     }

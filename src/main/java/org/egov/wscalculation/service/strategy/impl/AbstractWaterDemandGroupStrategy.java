@@ -68,9 +68,8 @@ public abstract class AbstractWaterDemandGroupStrategy implements GroupDemandStr
                     + normCode + ". Verify the required property inputs.");
         }
 
-        // C-4's LPCD changes at 100 effective beds. Feed the calculated
-        // (sanctioned-vs-area minimum) bed count into the MDMS formula so that
-        // the rates remain configuration-driven rather than hard-coded here.
+        // C-4's primary occupancy is the supplied Number of Beds only. Feed that
+        // bed count into the MDMS LPCD and separate OPD formulas.
         if ("C-4".equals(normCode)) {
             context.put("effective_beds", occupancy);
         }
@@ -244,10 +243,13 @@ public abstract class AbstractWaterDemandGroupStrategy implements GroupDemandStr
                 }
                 break;
             case "C-4":
-                // Sanctioned beds may be absent/zero: the MDMS area-based minimum
-                // bed formula supplies effective occupancy in that case.
-                requirePositiveInput(context, "built_up_area", normCode);
+                // C-4 primary occupancy is driven only by the sanctioned Number of Beds.
+                // Built-up area is not used as an occupancy substitute or fallback.
+                requirePositiveInput(context, "sanctioned_beds", normCode);
                 requirePositiveInput(context, "plot_area", normCode);
+                if (value(context, "opd_area_provided").compareTo(BigDecimal.ONE) != 0) {
+                    throw new IllegalStateException("C-4 requires an explicit OPD area input. Supply additionalDetails.opdArea (zero is allowed when no separate OPD area applies) or questions[{questionCode:'opdArea', answer:'...'}].");
+                }
                 break;
             default:
                 throw new IllegalStateException("Unsupported revised WaterDemandNorms2 code '" + normCode + "'. "

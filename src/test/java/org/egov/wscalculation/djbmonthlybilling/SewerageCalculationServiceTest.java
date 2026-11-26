@@ -340,6 +340,35 @@ class SewerageCalculationServiceTest {
 
 
     @Test
+    void shouldUseBedsForBedBasedSewerageRuleEvenWhenRoomCountIsAlsoPresent() {
+        SewerageCalculationContext context = SewerageCalculationContext.builder()
+                .waterConnectionAvailable(true).sewerConnectionAvailable(true)
+                .additionalWaterSource(true).propertyUsage("HOSPITAL")
+                .numberOfRooms(180).numberOfBeds(25).build();
+        DJBAdditionalSewerageCharge hospital = new DJBAdditionalSewerageCharge();
+        hospital.setCode("HOSPITAL_25_50"); hospital.setPropertyUsage("HOSPITAL");
+        hospital.setFromBeds(25); hospital.setToBeds(50);
+        hospital.setChargeType("FIXED_MONTHLY"); hospital.setAmount(bd("2000")); hospital.setActive(true);
+
+        SewerageCalculationResult result = service.calculate(context, Arrays.asList(waterConnected), Arrays.asList(hospital));
+        assertEquals(bd("2000.00"), result.getAdditionalSewerageCharge());
+    }
+
+    @Test
+    void shouldRejectRangeBasedAdditionalChargeWhenItsRoomOrBedCountIsMissing() {
+        SewerageCalculationContext context = SewerageCalculationContext.builder()
+                .waterConnectionAvailable(true).sewerConnectionAvailable(true)
+                .additionalWaterSource(true).propertyUsage("HOSPITAL").build();
+        DJBAdditionalSewerageCharge hospital = new DJBAdditionalSewerageCharge();
+        hospital.setCode("HOSPITAL_25_50"); hospital.setPropertyUsage("HOSPITAL");
+        hospital.setFromBeds(25); hospital.setToBeds(50);
+        hospital.setChargeType("FIXED_MONTHLY"); hospital.setAmount(bd("2000")); hospital.setActive(true);
+
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                () -> service.calculate(context, Arrays.asList(waterConnected), Arrays.asList(hospital)));
+    }
+
+    @Test
     void shouldApplyDomesticNoWaterSewerageAbove200OnlyWhenAreaIsGreaterThan200() {
         DJBMonthlySewerageRule above200 = regularRule(
                 "DOMESTIC_ABOVE_200", "DOMESTIC", "FIXED_MONTHLY", null, 200.0, null, 450);

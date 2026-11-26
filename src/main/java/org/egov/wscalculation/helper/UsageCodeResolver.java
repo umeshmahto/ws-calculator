@@ -30,7 +30,7 @@ public class UsageCodeResolver {
 
     private static final String WATER_DEMAND_NORMS_V2 = "WaterDemandNorms2";
     private static final String PROPERTY_TYPE_V2 = "PropertyType2";
-    private static final String PROPERTY_CATEGORY_V2 = "PropertyCategory";
+    private static final String PROPERTY_CATEGORY_MASTER = "PropertyCategory";
 
     private final ObjectMapper mapper;
     private final PropertyContextExtractor contextExtractor;
@@ -126,10 +126,11 @@ public class UsageCodeResolver {
 
     private String validatePropertyCategory(Map<String, Object> masterData,
             Map<String, Object> propertyTypeEntry, String requestedPropertyCategory) {
-        List<Map<String, Object>> categories = toMapList(masterData == null ? null : masterData.get(PROPERTY_CATEGORY_V2));
+        List<Map<String, Object>> categories = toMapList(
+                masterData == null ? null : masterData.get(PROPERTY_CATEGORY_MASTER));
         if (CollectionUtils.isEmpty(categories)) {
-            throw new IllegalStateException("PropertyCategory MDMS master is missing or empty. "
-                    + "Fetch PropertyTax.PropertyCategory along with PropertyType2 and WaterDemandNorms2.");
+            throw new IllegalStateException("PropertyTax.PropertyCategory MDMS master is missing or empty. "
+                    + "Expected four active categories: RESIDENTIAL, COMMERCIAL, INSTITUTIONAL and INDUSTRIAL.");
         }
         // The DJB property form has exactly these four top-level categories.
         // Fail fast if the master deployment is incomplete rather than accepting

@@ -45,6 +45,29 @@ class UsageCodeResolverNorms2Test {
     }
 
     @Test
+    void resolvesUsingDeployedPropertyCategoryMasterName() {
+        Map<String, Object> type = propertyType("GeneralIndustrialUnit", "INDUSTRIAL", "B-3");
+        Map<String, Object> masterData = masterData(type,
+                norm("B-3", "COMMERCIAL", Arrays.asList("COMMERCIAL", "INDUSTRIAL")));
+
+        assertEquals("B-3", resolver.resolveDemandNormCodeFromSelection(
+                masterData, "GeneralIndustrialUnit", "Bulk", "Industrial", "Non-Domestic"));
+    }
+
+    @Test
+    void supportsPropertyCategoryV2AsCompatibilityAlias() {
+        Map<String, Object> type = propertyType("GeneralIndustrialUnit", "INDUSTRIAL", "B-3");
+        Map<String, Object> masterData = masterData(type,
+                norm("B-3", "COMMERCIAL", Arrays.asList("COMMERCIAL", "INDUSTRIAL")));
+        Object categories = masterData.remove("PropertyCategory");
+        // The PropertyCategoryV2 key is an optional compatibility alias only.
+        masterData.put("PropertyCategoryV2", categories);
+
+        assertEquals("B-3", resolver.resolveDemandNormCodeFromSelection(
+                masterData, "GeneralIndustrialUnit", "Bulk", "Industrial", "Non-Domestic"));
+    }
+
+    @Test
     void requiresAllFourDjbPropertyCategoriesToBeActive() {
         Map<String, Object> type = propertyType("School", "INSTITUTIONAL", "B-1");
         Map<String, Object> norm = norm("B-1", "INSTITUTIONAL", Arrays.asList("INSTITUTIONAL"));
