@@ -79,6 +79,29 @@ class WaterDemandCalculatorNorms2Test {
     }
 
     @Test
+    void b1UsesQuestionStrengthWithThePublishedBothShiftMdmsFormula() {
+        Map<String, Object> propertyDetails = details("B-1");
+        propertyDetails.put("builtUpArea", new BigDecimal("400"));
+
+        Map<String, Object> question = new LinkedHashMap<>();
+        question.put("question", "totalStrengthIncludingStaffAndStudents");
+        question.put("answer", "760");
+        propertyDetails.put("questions", Arrays.asList(question));
+
+        Map<String, Object> b1Norm = norm("B-1", "INSTITUTIONAL",
+                "MAX(built_up_area / 4.0, total_strength_including_students_and_staff_of_both_shifts)",
+                45, 15, 30, "POTABLE_ONLY_IF_OVER_12500");
+        b1Norm.put("contingencyPercentage", new BigDecimal("10"));
+
+        WaterDemandResult result = calculate(property("College", propertyDetails), Arrays.asList(b1Norm));
+
+        assertEquals(new BigDecimal("760"), result.getCalculatedOccupancy());
+        assertEquals(new BigDecimal("15"), result.getChosenLpcd());
+        assertTrue(result.getPotableThresholdApplied());
+        assertEquals(new BigDecimal("12540.00"), result.getTotalWaterDemand());
+    }
+
+    @Test
     void b1NormUsesAreaBasedOccupancyWhenStrengthIsNotCollected() {
         Map<String, Object> propertyDetails = details("B-1");
         propertyDetails.put("builtUpArea", new BigDecimal("800"));

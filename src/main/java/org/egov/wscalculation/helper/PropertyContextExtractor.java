@@ -150,6 +150,7 @@ public class PropertyContextExtractor {
         vars.put("total_students", studentsCount);
         vars.put("total_staff", staffCount);
         vars.put("total_strength_including_staff_and_students", totalStrengthIncludingStaffAndStudents);
+        vars.put("total_strength_including_students_and_staff_of_both_shifts",totalStrengthIncludingStaffAndStudents);
         vars.put("total_strength", totalStrength);
         vars.put("total_seats", seatsCount);
         vars.put("sq_area", servantQuarterArea);
