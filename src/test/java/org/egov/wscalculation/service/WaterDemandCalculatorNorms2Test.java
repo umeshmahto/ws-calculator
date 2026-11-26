@@ -302,6 +302,20 @@ class WaterDemandCalculatorNorms2Test {
     }
 
     @Test
+    void c4UsesBuiltUpAreaMinimumWhenSanctionedBedsQuestionIsNotAnswered() {
+        Map<String, Object> propertyDetails = details("C-4");
+        propertyDetails.put("builtUpArea", new BigDecimal("1200"));
+        propertyDetails.put("plotArea", new BigDecimal("2000"));
+
+        WaterDemandResult result = calculate(property("NursingHome", propertyDetails),
+                Arrays.asList(hospitalNorm()));
+
+        assertEquals(new BigDecimal("20"), result.getCalculatedOccupancy());
+        assertEquals(new BigDecimal("6000"), result.getOpdPotableDemand());
+        assertEquals(new BigDecimal("12100.00"), result.getTotalWaterDemand());
+    }
+
+    @Test
     void ddaFlatPropertyIfcOverrideIsZeroWithoutChangingOccupancyNorm() {
         Map<String, Object> propertyDetails = details("A-1");
         propertyDetails.put("questions", Arrays.asList(questionAnswer("numberOfDwellingUnits", "2")));
@@ -359,6 +373,10 @@ class WaterDemandCalculatorNorms2Test {
         propertyTypeEntry.put("categoryType", Arrays.asList(
                 "RESIDENTIAL".equalsIgnoreCase(propertyCategory) ? "Domestic" : "Non-Domestic"));
         propertyTypeEntry.put("demandNormCode", normCode);
+        if ("C-4".equals(normCode)) {
+            propertyTypeEntry.put("facilityType",
+                    "NursingHome".equalsIgnoreCase(property.getPropertyType()) ? "NURSING_HOME" : "HOSPITAL");
+        }
         propertyTypeEntry.put("active", true);
         List<String> configuredQuestionCodes = new java.util.ArrayList<>();
         Object rawQuestionAnswers = selectedDetails.get("questions");
@@ -366,6 +384,7 @@ class WaterDemandCalculatorNorms2Test {
             for (Object rawQuestionAnswer : (Iterable<?>) rawQuestionAnswers) {
                 if (rawQuestionAnswer instanceof Map<?, ?>) {
                     Object code = ((Map<?, ?>) rawQuestionAnswer).get("questionCode");
+                    if (code == null) code = ((Map<?, ?>) rawQuestionAnswer).get("question");
                     if (code != null) configuredQuestionCodes.add(code.toString());
                 }
             }
@@ -454,7 +473,7 @@ class WaterDemandCalculatorNorms2Test {
         norm.put("subCategoryCode", "C-4");
         norm.put("parentUsageCode", "INSTITUTIONAL");
         norm.put("name", "Nursing Homes / Hospitals / Sanatoria");
-        norm.put("minOccupancyFormula", "sanctioned_beds");
+        norm.put("minOccupancyFormula", "MAX(sanctioned_beds, minimum_beds_from_built_up_area)");
         norm.put("totalLpcd", null);
         norm.put("potableLpcd", null);
         norm.put("nonPotableLpcd", new BigDecimal("90"));
@@ -465,6 +484,13 @@ class WaterDemandCalculatorNorms2Test {
         norm.put("ifcCalculationBasis", "POTABLE_ONLY_IF_OVER_12500");
         norm.put("ifcThresholdLpd", new BigDecimal("12500"));
         norm.put("parentUsageCodes", Arrays.asList("INSTITUTIONAL"));
+        Map<String, Object> minimumBedFormulas = new LinkedHashMap<>();
+        minimumBedFormulas.put("HOSPITAL", "built_up_area / 80.0");
+        minimumBedFormulas.put("NURSING_HOME", "built_up_area / 60.0");
+        norm.put("minimumBedCountFormulaByFacilityType", minimumBedFormulas);
+        norm.put("opdOccupancyFormula", "MAX(opd_area / 1.5, effective_beds * 20)");
+        norm.put("opdDemandLpcd", new BigDecimal("15"));
+        norm.put("opdDemandType", "POTABLE_ONLY");
         Map<String, Object> plotRules = new LinkedHashMap<>();
         plotRules.put("HOSPITAL", "plot_area >= 2500");
         plotRules.put("NURSING_HOME", "plot_area <= 2500");

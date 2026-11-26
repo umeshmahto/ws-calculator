@@ -52,9 +52,10 @@ public class PropertyContextExtractor {
         BigDecimal duCount = questionAnswers.getOrDefault("total_du", BigDecimal.ZERO);
         BigDecimal bedsCount = questionAnswers.getOrDefault("sanctioned_beds", BigDecimal.ZERO);
         BigDecimal roomsCount = questionAnswers.getOrDefault("total_rooms", BigDecimal.ZERO);
-        BigDecimal studentsCount = questionAnswers.getOrDefault("total_strength_including_staff_and_students", BigDecimal.ZERO);
-        BigDecimal seatsCount = BigDecimal.ZERO;
-        BigDecimal staffCount = BigDecimal.ZERO;
+        BigDecimal studentsCount = questionAnswers.getOrDefault("total_students", BigDecimal.ZERO);
+        BigDecimal seatsCount = questionAnswers.getOrDefault("total_seats", BigDecimal.ZERO);
+        BigDecimal staffCount = questionAnswers.getOrDefault("total_staff", BigDecimal.ZERO);
+        BigDecimal combinedStrength = questionAnswers.getOrDefault("total_strength_including_staff_and_students", BigDecimal.ZERO);
 
         BigDecimal sqArea = getBigDecimalFromMap(details, "servantQuarterArea");
         if (sqArea.compareTo(BigDecimal.ZERO) == 0) {
@@ -72,7 +73,7 @@ public class PropertyContextExtractor {
         vars.put("specified_beds", bedsCount);
         vars.put("total_beds", bedsCount);
         vars.put("total_rooms", roomsCount);
-        vars.put("highest_shift_strength", studentsCount);
+        vars.put("highest_shift_strength", combinedStrength);
         vars.put("total_students", studentsCount);
         vars.put("total_seats", seatsCount);
         vars.put("total_staff", staffCount);
@@ -121,9 +122,9 @@ public class PropertyContextExtractor {
         BigDecimal duCount = questionAnswers.getOrDefault("total_du", BigDecimal.ZERO);
         BigDecimal bedsCount = questionAnswers.getOrDefault("sanctioned_beds", BigDecimal.ZERO);
         BigDecimal roomsCount = questionAnswers.getOrDefault("total_rooms", BigDecimal.ZERO);
-        BigDecimal studentsCount = BigDecimal.ZERO;
-        BigDecimal staffCount = BigDecimal.ZERO;
-        BigDecimal seatsCount = BigDecimal.ZERO;
+        BigDecimal studentsCount = questionAnswers.getOrDefault("total_students", BigDecimal.ZERO);
+        BigDecimal staffCount = questionAnswers.getOrDefault("total_staff", BigDecimal.ZERO);
+        BigDecimal seatsCount = questionAnswers.getOrDefault("total_seats", BigDecimal.ZERO);
         BigDecimal servantQuarterArea = firstPositive(details, "servantQuarterArea", "sqArea", "sq_area");
 
         BigDecimal totalStrengthIncludingStaffAndStudents = questionAnswers.getOrDefault(
@@ -158,19 +159,16 @@ public class PropertyContextExtractor {
         // Revised DJB C-4 and B-2 use-class inputs. The property type itself is
         // already selected in the common property form; these are derived flags,
         // not additional citizen questions.
-        BigDecimal opdArea = firstPositive(details, "opdArea", "opd_area", "opdBuiltUpArea", "opdSectionArea");
+        // OPD area is a form answer and must be read through its stable questionCode,
+        // not from a parallel additionalDetails.opdArea field.
+        BigDecimal opdArea = questionAnswers.getOrDefault("opd_area", BigDecimal.ZERO);
         vars.put("opd_area", opdArea);
-        // B-2 MERCANTILE/ASSEMBLY is resolved from PropertyType2.demandNormSubType
-        // by WaterDemandCalculator. Do not infer this IFC rule from display labels.
+        // These classification flags are populated from PropertyType2 MDMS by
+        // WaterDemandCalculator; do not infer facility/use classes from labels.
         vars.put("is_assembly_use", BigDecimal.ZERO);
-        String propertyType = property == null ? "" : String.valueOf(property.getPropertyType());
-        String normalizedType = propertyType.toUpperCase(java.util.Locale.ROOT);
-        BigDecimal hospitalFlag = normalizedType.contains("HOSPITAL") ? BigDecimal.ONE : BigDecimal.ZERO;
-        vars.put("is_hospital_property", hospitalFlag);
-        BigDecimal minimumBedsByArea = hospitalFlag.compareTo(BigDecimal.ZERO) > 0
-                ? builtUpArea.divide(new BigDecimal("80"), 8, java.math.RoundingMode.CEILING)
-                : builtUpArea.divide(new BigDecimal("60"), 8, java.math.RoundingMode.CEILING);
-        vars.put("minimum_beds_by_area", minimumBedsByArea);
+        vars.put("is_hospital_property", BigDecimal.ZERO);
+        vars.put("minimum_beds_by_area", BigDecimal.ZERO);
+        vars.put("minimum_beds_from_built_up_area", BigDecimal.ZERO);
 
         return vars;
     }

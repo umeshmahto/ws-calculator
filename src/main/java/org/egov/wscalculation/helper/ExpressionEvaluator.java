@@ -79,8 +79,7 @@ public class ExpressionEvaluator {
             BigDecimal right = evaluateExpression(expr.substring(mulDivIdx + 1), context);
             if ("/".equals(op)) {
                 if (right.compareTo(BigDecimal.ZERO) == 0) {
-                    log.warn("Division by zero in expression: {}. Returning ZERO.", expr);
-                    return BigDecimal.ZERO;
+                    throw new IllegalArgumentException("Division by zero in MDMS formula: " + expr);
                 }
                 return left.divide(right, WSCalculationConstant.DIVISION_SCALE, RoundingMode.HALF_UP);
             } else {
@@ -174,8 +173,10 @@ public class ExpressionEvaluator {
         }
         try {
             return new BigDecimal(token.trim());
-        } catch (Exception e) {
-            return BigDecimal.ZERO;
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Unknown variable/token '" + token.trim()
+                    + "' in MDMS calculation formula. Check the questionCode-to-calculation-variable mapping "
+                    + "and WaterDemandNorms2 formula.", e);
         }
     }
 }

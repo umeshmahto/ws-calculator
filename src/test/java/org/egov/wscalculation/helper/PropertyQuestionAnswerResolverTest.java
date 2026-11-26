@@ -90,6 +90,33 @@ class PropertyQuestionAnswerResolverTest {
     }
 
     @Test
+    void optionalQuestionMayBeOmittedButIsValidatedWhenProvided() {
+        Map<String, Object> optionalBeds = new LinkedHashMap<>();
+        optionalBeds.put("questionCode", "numberOfBeds");
+        optionalBeds.put("required", false);
+
+        Map<String, Object> details = details();
+        PropertyQuestionAnswerResolver.validateRequiredQuestions(details, Arrays.asList(optionalBeds), "Hotel");
+
+        Map<String, Object> invalidDetails = details(question("numberOfBeds", "-1"));
+        assertThrows(IllegalArgumentException.class,
+                () -> PropertyQuestionAnswerResolver.validateRequiredQuestions(
+                        invalidDetails, Arrays.asList(optionalBeds), "Hotel"));
+    }
+
+    @Test
+    void mapsOpdAreaAndSeatQuestionsFromStableCodes() {
+        Map<String, Object> details = details(
+                question("opdArea", "125.5"),
+                question("numberOfSeats", "40"));
+
+        Map<String, BigDecimal> values = PropertyQuestionAnswerResolver.extractNumericAnswers(details);
+
+        assertEquals(new BigDecimal("125.5"), values.get("opd_area"));
+        assertEquals(new BigDecimal("40"), values.get("total_seats"));
+    }
+
+    @Test
     void categorySelectionIsResolvedByQuestionCodeAndAnswer() {
         Map<String, Object> details = details(question("PREMISES_HAS_RESIDENTIAL_UNITS", "NO"));
         details.put("categoryType", "Non-Domestic");
